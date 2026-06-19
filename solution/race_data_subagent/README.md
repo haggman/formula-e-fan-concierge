@@ -8,8 +8,9 @@ One intelligent agent that owns **both worlds** and is **time-honest**:
   race results. "How's Evans done over recent seasons?"
 
 CX calls **this** subagent — never Firestore or BigQuery directly — so CX stays a pure
-orchestrator. The subagent is exposed to CX as an **MCP tool** (see
-`spec/cx_integration_spike.md`).
+orchestrator. The subagent runs on **Cloud Run** and serves its own `POST /ask_race_data`
+**OpenAPI** endpoint; CX reaches it via an **OpenAPI tool** with Service Agent ID Token auth
+(validated live — see `spec/cx_integration_spike.md`).
 
 ## Why a subagent, not raw tools
 
@@ -35,22 +36,28 @@ prior seasons is naturally ≤ the current wall moment, so the same single bound
 R10 itself the agent must not see the future. The bound enforces this mechanically; the prompt
 reinforces it.
 
-## The MCP wire to CX (recommended path)
+## The wire to CX (validated 2026-06-19 — OpenAPI on Cloud Run)
 
 ```
-CX Agent Studio  ──MCP (StreamableHttp, /mcp, Service Agent ID Token)──►
-   race-data subagent MCP server (Cloud Run)  ──►  ADK agent
+CX Agent Studio  ──OpenAPI tool (POST /ask_race_data, Service Agent ID Token)──►
+   race-data subagent (ADK agent on Cloud Run — the agent IS the service)
        ├─ MCP Toolbox (BigQuery: R10 + career)        [reused from Ch2]
        └─ now_tools (Firestore "now", field-wide)     [new, small]
 ```
 
-- Transport: **StreamableHttp** only (CX does not support SSE). Server URL ends `/mcp`.
-- Host: **Cloud Run**. Auth: **Service Agent ID Token** — grant `run.invoker` to
-  `service-{PROJECT_NUMBER}@gcp-sa-ces.iam.gserviceaccount.com` (the CX Agent Studio SA).
-  This is the same IAM pattern as Ch2's Pub/Sub push auth.
-- Execution mode: the subagent does multiple LLM/tool calls, so a round trip can exceed the
-  ~5s sync ceiling — configure the CX tool for **async / long-running** execution.
-- Fallback wire: **OpenAPI tool** (same auth options) if MCP is blocked. See the spike.
+- Serve via ADK's `get_fast_api_app()` + a single `@app.post("/ask_race_data")` operation
+  (FastAPI auto-serves `/openapi.json`). The agent is the service — **no separate wrapper**.
+- Host: **Cloud Run**, deployed private. Auth: **Service Agent ID Token** — grant `run.invoker`
+  to `service-{PROJECT_NUMBER}@gcp-sa-ces.iam.gserviceaccount.com` (the CES service agent).
+  Same-project Cloud Run needs no extra IAM beyond that grant.
+- Execution mode: multiple LLM/tool calls can exceed CX's ~5s sync ideal — set the CX tool to
+  **async / long-running** (5–60s) when tool latency warrants. (A 6.7s simulator turn was
+  tolerated with no async config in the spike.)
+- Why OpenAPI (not MCP or A2A/registry): CX has no A2A/Agent-Registry tool type, and Agent
+  Engine can't serve a custom OpenAPI path; MCP-on-Cloud-Run works but adds no payoff over
+  plain OpenAPI for a student lab. Full reasoning + evidence in `spec/cx_integration_spike.md`.
+- **Optional showcase:** also deploy to Agent Engine (auto-registers in Agent Registry) and/or
+  expose an A2A door (`to_a2a(root_agent)`, ~1 line). Off the critical path.
 
 ## Files
 
@@ -58,5 +65,6 @@ CX Agent Studio  ──MCP (StreamableHttp, /mcp, Service Agent ID Token)──�
 - `config.py` — race scope + the time bridge (must match the commentator's constant).
 - `prompts.py` — time-honesty doctrine + how to choose "now" vs "then" tools.
 - `tools/now_tools.py` — field-wide Firestore "now" lookups (any car, not just #13).
-- `mcp_server.py` — FastMCP StreamableHttp wrapper exposing `ask_race_data(question)`.
-- `Dockerfile` — container for the Cloud Run MCP server.
+- `app.py` — FastAPI service: `get_fast_api_app()` + `POST /ask_race_data` (the CX OpenAPI op).
+- `Dockerfile` — container for the Cloud Run service (the agent is the service).
+- See `spike/cx_openapi_spike/` for the validated reference implementation of this wire.

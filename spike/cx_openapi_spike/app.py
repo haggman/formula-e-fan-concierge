@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import os
+import uuid
 
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
@@ -78,7 +79,7 @@ async def _run_llm(question: str) -> dict:
             agent=build_agent(), app_name=APP_NAME, session_service=_session_service
         )
 
-    uid, sid = "spike-user", "spike-session"
+    uid, sid = "spike-user", f"spike-{uuid.uuid4().hex}"  # unique per request — no AlreadyExists
     await _session_service.create_session(app_name=APP_NAME, user_id=uid, session_id=sid)
 
     # Capture the tool's structured output for the time-honest fields, while the

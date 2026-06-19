@@ -12,7 +12,8 @@ Students build **three backend agents**:
    Search; delegates race/stats questions to the race-data subagent.
 3. **Race-Data Subagent** (`*/race_data_subagent/`) — an **ADK** agent that owns **both**
    worlds: Firestore "now" + BigQuery "then" (10 seasons career/results + R10), **time-honest**.
-   Exposed to CX as an **MCP tool** (see `spec/cx_integration_spike.md`).
+   Runs on **Cloud Run** and serves its own `POST /ask_race_data` **OpenAPI** endpoint; CX calls it
+   via an **OpenAPI tool** (Service Agent ID Token). Validated live — see `spec/cx_integration_spike.md`.
 
 This repo is a **clean fork of the Challenge 2 chassis** (`../formula-e-race-engineer/`),
 vendoring the pieces we keep and rebuilding the rest. See `spec/architecture.md` for the
