@@ -1,0 +1,462 @@
+# MCP Toolbox config for the Formula E Race Engineer agent.
+# Source: Berlin 2024 R10 (and FE career data) in BigQuery dataset fe_race10.
+#
+# Time format note: most BQ timestamps are INT64 nanoseconds since epoch.
+# The agent passes wall-clock-time-ns as a parameter; the simulator's
+# frontend computes that from race_time_s + race_start_epoch_ns.
+#
+# ----------------------------------------------------------------------------
+# PRODUCTION NOTE — this Toolbox deploys with OPEN auth, on purpose.
+#
+# The lab leaves fe-toolbox at --allow-unauthenticated because the threat
+# model doesn't justify the lockdown: every tool here is a read-only SELECT
+# over public 2024 sports data, in an ephemeral lab project, behind an
+# unguessable Cloud Run URL. Worst case is a stranger spending pennies of
+# BigQuery scan. The auth effort in this stack went where unauthenticated
+# access could corrupt state: the State Writer's OIDC-authenticated
+# Pub/Sub push.
+#
+# To lock it down for production:
+#   1. Grant the caller invoker rights. The agent calls Toolbox FROM Agent
+#      Engine, so the caller is the engine's service agent:
+#        gcloud run services add-iam-policy-binding fe-toolbox \
+#          --member="serviceAccount:service-PROJECT_NUMBER@gcp-sa-aiplatform-re.iam.gserviceaccount.com" \
+#          --role="roles/run.invoker" --region=us-central1
+#   2. Redeploy fe-toolbox with --no-allow-unauthenticated
+#      (flip the flag in deploy/deploy_toolbox.sh).
+#   3. VERIFY the agent's ToolboxToolset attaches an identity token to its
+#      requests — this is the step with real uncertainty. Run
+#      scripts/engine_smoke.py: if the BigQuery question fails after the
+#      flip, the toolset is calling anonymously and needs its auth hook
+#      configured (see toolbox-core docs on Cloud Run authentication).
+#   Rollback is one command: redeploy with --allow-unauthenticated.
+# ----------------------------------------------------------------------------
+
+sources:
+  bq-fe-race10:
+    kind: bigquery
+    project: ${GOOGLE_CLOUD_PROJECT}
+    # location is inferred from the dataset
+
+tools:
+
+  get_driver_info:
+    kind: bigquery-sql
+    source: bq-fe-race10
+    description: |
+      Get driver and team info for a car number, plus their starting grid position.
+      Use this when the agent needs to know who is driving a particular car,
+      what team they race for, or where they qualified.
+    parameters:
+      - name: car_number
+        type: integer
+        description: "Car number, e.g. 13 for our driver António Félix da Costa"
+    statement: |
+      SELECT
+        d.car_number,
+        d.driver_first_name,
+        d.driver_last_name,
+        d.driver_short_name,
+        d.driver_country,
+        d.team,
+        d.manufacturer,
+        g.position AS grid_position
+      FROM `fe_race10.drivers` d
+      LEFT JOIN `fe_race10.startgrid` g USING (car_number)
+      WHERE d.car_number = @car_number
+
+  get_lap_history:
+    kind: bigquery-sql
+    source: bq-fe-race10
+    description: |
+      Per-lap timing for a car over a range of laps. Returns lap time (ms),
+      position at end of lap, and validity flag. Use this to assess pace,
+      find fastest laps, or check recent position trends.
+
+      Note: for top speed per lap, use get_top_speed_history instead.
+      The top_speed column in the source laps table is broken (always 0).
+    parameters:
+      - name: car_number
+        type: integer
+        description: "Car number"
+      - name: lap_start
+        type: integer
+        description: "First lap to include (inclusive). Use 1 for race start."
+      - name: lap_end
+        type: integer
+        description: "Last lap to include (inclusive). Use 41 for full race."
+    statement: |
+      SELECT
+        lap_num,
+        time AS lap_time_ms,
+        position,
+        is_valid
+      FROM `fe_race10.laps`
+      WHERE car_number = @car_number
+        AND lap_num BETWEEN @lap_start AND @lap_end
+      ORDER BY lap_num
+
+  get_top_speed_history:
+    kind: bigquery-sql
+    source: bq-fe-race10
+    description: |
+      Per-lap top speed for a car over a range of laps. Top speed is the
+      maximum 20 Hz telemetry sample within each lap window. Use this to
+      spot Attack Mode usage (AM adds +50 kW, which usually shows up as a
+      noticeable bump in top speed), slipstream effects, or pace patterns.
+
+      Returned values are in km/h. Each row also includes the number of
+      telemetry samples that fell in that lap (~1200 for a normal racing
+      lap at 20 Hz, fewer for safety car laps or shortened first laps).
+
+      Important context: top_speed in the `laps` table itself is broken
+      (always 0). Always use this tool for top speed, never the laps table.
+    parameters:
+      - name: car_number
+        type: integer
+        description: "Car number"
+      - name: lap_start
+        type: integer
+        description: "First lap to include (inclusive). Use 1 for race start."
+      - name: lap_end
+        type: integer
+        description: "Last lap to include (inclusive). Use 41 for full race."
+    statement: |
+      SELECT
+        lap_num,
+        top_speed_kmh,
+        telemetry_samples
+      FROM `fe_race10.top_speed_per_lap`
+      WHERE car_number = @car_number
+        AND lap_num BETWEEN @lap_start AND @lap_end
+      ORDER BY lap_num
+  
+  get_energy_curve:
+    kind: bigquery-sql
+    source: bq-fe-race10
+    description: |
+      Per-lap energy consumption for a car compared to the field average.
+      Returns each lap's consumption (% of race budget), the running cumulative,
+      and the field average for that lap. Use this to assess whether the car
+      is over- or under-spending energy versus the field at this point in the race.
+      
+      IMPORTANT data semantics: percent_consumed is normalized so each car's
+      race total sums to exactly 100. Mid-race deltas vs the field are real
+      signal; comparisons at or near the final lap converge to 100 for
+      everyone by construction and mean nothing.
+    parameters:
+      - name: car_number
+        type: integer
+        description: "Car number"
+      - name: through_lap
+        type: integer
+        description: "Include laps up to and including this lap number"
+    statement: |
+      WITH field_avg AS (
+        SELECT lap_number, AVG(percent_consumed) AS field_avg_pct
+        FROM `fe_race10.energy_per_lap`
+        WHERE lap_number <= @through_lap
+        GROUP BY lap_number
+      ),
+      car_laps AS (
+        SELECT
+          lap_number,
+          percent_consumed,
+          SUM(percent_consumed) OVER (ORDER BY lap_number) AS cumulative_pct
+        FROM `fe_race10.energy_per_lap`
+        WHERE car_number = @car_number
+          AND lap_number <= @through_lap
+      )
+      SELECT
+        c.lap_number,
+        ROUND(c.percent_consumed, 3) AS pct_consumed,
+        ROUND(c.cumulative_pct, 3) AS cumulative_pct,
+        ROUND(f.field_avg_pct, 3) AS field_avg_pct,
+        ROUND(c.percent_consumed - f.field_avg_pct, 3) AS delta_vs_field
+      FROM car_laps c
+      LEFT JOIN field_avg f USING (lap_number)
+      ORDER BY c.lap_number
+
+  get_recent_race_control:
+    kind: bigquery-sql
+    source: bq-fe-race10
+    description: |
+      The N most recent race control messages before a given wall-clock time.
+      Returns category (classified) and full text. Use this to understand
+      current race state — safety car, yellow flags, incidents.
+    parameters:
+      - name: through_time_ns
+        type: integer
+        description: "Wall-clock time in nanoseconds since epoch. Only messages at or before this time are returned."
+      - name: limit_n
+        type: integer
+        description: "Maximum number of messages to return (most recent first)"
+    statement: |
+      SELECT
+        time AS time_ns,
+        category,
+        message_text
+      FROM `fe_race10.racecontrol_classified`
+      WHERE time <= @through_time_ns
+      ORDER BY time DESC
+      LIMIT @limit_n
+
+  get_am_activations:
+    kind: bigquery-sql
+    source: bq-fe-race10
+    description: |
+      All Attack Mode activation and deactivation events through a given time.
+      Returns car, driver, time, and whether AM was turning on (active=true)
+      or off (active=false). Use this to see which cars have used AM, when,
+      and whether the field is in a cluster of activations.
+
+      NOTE: This returns real activations only. For "what scenario did the
+      driver arm before activating" use get_am_armings instead.
+    parameters:
+      - name: through_time_ns
+        type: integer
+        description: "Wall-clock time in nanoseconds since epoch."
+    statement: |
+      SELECT
+        a.car_number,
+        d.driver_short_name,
+        d.team,
+        UNIX_MICROS(TIMESTAMP_MICROS(CAST(a.eth_arrival_time / 1000 AS INT64))) * 1000 AS time_ns,
+        a.active,
+        a.scenario
+      FROM `fe_race10.attack` a
+      LEFT JOIN `fe_race10.drivers` d USING (car_number)
+      WHERE a.active IS NOT NULL
+        AND a.eth_arrival_time <= @through_time_ns
+      ORDER BY a.eth_arrival_time
+
+  get_am_armings:
+    kind: bigquery-sql
+    source: bq-fe-race10
+    description: |
+      Scenario arming events — when a driver pre-selected which AM pattern
+      they plan to use next. Distinct from activations: an arming is strategic
+      intent, an activation is the actual deployment. Drivers can re-arm
+      multiple times before activating.
+
+      Scenario mapping: 1=short-first (60s+180s), 2=even (120s+120s),
+      3=long-first (180s+60s). Total AM budget is 240s.
+
+      Use this to detect strategic intent — e.g., "DAC has armed scenario 3
+      three times in the last lap, he's considering going long".
+    parameters:
+      - name: car_number
+        type: integer
+        description: "Car number. Use the same car for whole-race history."
+      - name: through_time_ns
+        type: integer
+        description: "Wall-clock time in nanoseconds since epoch."
+    statement: |
+      SELECT
+        a.car_number,
+        UNIX_MICROS(TIMESTAMP_MICROS(CAST(a.eth_arrival_time / 1000 AS INT64))) * 1000 AS time_ns,
+        a.scenario
+      FROM `fe_race10.attack` a
+      WHERE a.active IS NULL
+        AND a.scenario IS NOT NULL
+        AND a.car_number = @car_number
+        AND a.eth_arrival_time <= @through_time_ns
+      ORDER BY a.eth_arrival_time
+
+  get_overtakes_involving:
+    kind: bigquery-sql
+    source: bq-fe-race10
+    description: |
+      Overtakes involving a specific car. Call this for ANY question about
+      overtakes, passes, or position battles — it is the AUTHORITATIVE
+      record, resolved to real car numbers and driver codes. Do NOT answer
+      overtake questions by reconstructing passes from lap positions, lap
+      standings, or lap-time windows: those are lap-end snapshots and miss
+      mid-lap moves. Count ONLY from the rows this tool returns.
+
+      For a head-to-head BETWEEN TWO cars (e.g. "how many times did 13
+      overtake 25"), pass other_car_number to get the complete record for
+      that pair. To count, use the direction_for_query_car field:
+      'query_car_passed_other' means car_number made the pass;
+      'other_passed_query_car' means car_number was passed. (position_change
+      is from each row's own subject perspective; direction_for_query_car
+      normalizes it to car_number so you can tally directly.)
+    parameters:
+      - name: car_number
+        type: integer
+        description: "Real car number, e.g. 13 for our driver"
+      - name: other_car_number
+        type: integer
+        default: 0
+        description: "Optional. The other car in a head-to-head question (e.g. 25 for Vergne). Omit (or 0) for all overtakes involving car_number."
+      - name: through_time_ns
+        type: integer
+        description: "Wall-clock time in nanoseconds since epoch (2024 race clock). Only events at or before this time."
+    statement: |
+      SELECT
+        event_time AS time_ns,
+        car_number,
+        driver_short_name,
+        other_car_number,
+        other_driver_short_name,
+        position_change,
+        at_loop,
+        human_summary,
+        CASE
+          WHEN car_number = @car_number AND position_change < 0 THEN 'query_car_passed_other'
+          WHEN car_number = @car_number AND position_change > 0 THEN 'other_passed_query_car'
+          WHEN other_car_number = @car_number AND position_change > 0 THEN 'query_car_passed_other'
+          WHEN other_car_number = @car_number AND position_change < 0 THEN 'other_passed_query_car'
+        END AS direction_for_query_car
+      FROM `fe_race10.v_overtakes`
+      WHERE event_time <= @through_time_ns
+        AND (car_number = @car_number OR other_car_number = @car_number)
+        AND (@other_car_number = 0
+             OR car_number = @other_car_number
+             OR other_car_number = @other_car_number)
+      ORDER BY event_time DESC
+      LIMIT 200
+
+  get_driver_career_stats:
+    kind: bigquery-sql
+    source: bq-fe-race10
+    description: |
+      Career Formula E statistics for a driver by 3-letter code. Returns total
+      wins, podiums, poles, points, race starts, plus first-race date. Use this
+      for context when the agent wants to reference a driver's history
+      ("this is DAC's 12th career FE win" or similar).
+    parameters:
+      - name: driver_code
+        type: string
+        description: "3-letter short code, e.g. DAC, CAS, EVA. Case-sensitive uppercase."
+    statement: |
+      SELECT
+        shortcode,
+        drivername,
+        country,
+        racestarts,
+        firststart AS first_race,
+        wins,
+        podiums,
+        poles,
+        fastestlaps,
+        points
+      FROM `fe_race10.career_driver`
+      WHERE shortcode = @driver_code
+
+  get_field_position_at_lap:
+    kind: bigquery-sql
+    source: bq-fe-race10
+    description: |
+      Snapshot of all cars' positions at the end of a given lap. Returns
+      position, car number, driver code, team, and that lap's time. Use this
+      to answer "where is the field at lap N" or to find gaps between cars.
+
+      Note: for top speed per car per lap, use get_top_speed_history.
+      The top_speed column in the source laps table is broken (always 0).
+    parameters:
+      - name: lap_number
+        type: integer
+        description: "Lap number, 1-41"
+    statement: |
+      SELECT
+        l.position,
+        l.car_number,
+        d.driver_short_name,
+        d.team,
+        l.time AS lap_time_ms
+      FROM `fe_race10.laps` l
+      LEFT JOIN `fe_race10.drivers` d USING (car_number)
+      WHERE l.lap_num = @lap_number
+      ORDER BY l.position
+
+  get_lap_time_windows:
+    kind: bigquery-sql
+    source: bq-fe-race10
+    description: |
+      Lap-number ↔ wall-clock mapping for a car: each lap's start and end in
+      nanoseconds since epoch, plus the lap time. Use this to convert event
+      timestamps (from get_overtakes_involving, get_am_armings,
+      get_am_activations, get_recent_race_control) into lap numbers, or to
+      build a time window covering specific laps. One call replaces ad-hoc
+      SQL against the laps table.
+    parameters:
+      - name: car_number
+        type: integer
+        description: "Car number whose lap clock to use (laps start at slightly different times per car; use car 13 for our reference frame)"
+    statement: |
+      SELECT
+        lap_num,
+        start_time AS lap_start_ns,
+        start_time + (time * 1000000) AS lap_end_ns,
+        time AS lap_time_ms
+      FROM `fe_race10.laps`
+      WHERE car_number = @car_number
+      ORDER BY lap_num
+  
+  bigquery_list_table_ids:
+    kind: bigquery-list-table-ids
+    source: bq-fe-race10
+    description: |
+      List the tables available in a BigQuery dataset. Use with
+      dataset 'fe_race10' to discover what race data exists before
+      writing SQL with execute_sql_bq.
+
+  bigquery_get_table_info:
+    kind: bigquery-get-table-info
+    source: bq-fe-race10
+    description: |
+      Get the schema (columns, types, descriptions) of a BigQuery table.
+      Use with dataset 'fe_race10' before writing SQL with execute_sql_bq —
+      never guess column names.
+  
+  execute_sql_bq:
+    kind: bigquery-execute-sql
+    source: bq-fe-race10
+    description: |
+      Escape hatch: run a read-only SELECT query against the fe_race10 dataset.
+      Use this only when the curated tools above can't answer the question.
+
+      Schema discovery: do NOT guess table or column names. Call
+      bigquery_list_table_ids (dataset 'fe_race10') and
+      bigquery_get_table_info first, then write the query.
+
+      Data semantics the schema won't tell you:
+        - laps.top_speed is broken (always 0). Use top_speed_per_lap or
+          get_top_speed_history instead.
+        - All time columns (event_stream.t, laps.start_time,
+          attack.eth_arrival_time, telemetry.time,
+          racecontrol_classified.time) are INT64 nanoseconds since epoch.
+          Compare directly — no UNIX_MICROS or TIMESTAMP_MICROS.
+        - energy_per_lap.percent_consumed is normalized: each car's race
+          total sums to exactly 100. Mid-race field comparisons are signal;
+          end-of-race comparisons are meaningless by construction.
+        - telemetry has 1.28M rows — always filter on car_number.
+
+      Important data notes:
+        - laps.top_speed is broken (always 0). Use top_speed_per_lap instead.
+        - Time columns (event_stream.t, laps.start_time, attack.eth_arrival_time,
+          telemetry.time, racecontrol_classified.time) are all INT64 nanoseconds
+          since epoch. Compare directly, no UNIX_MICROS or TIMESTAMP_MICROS needed.
+
+      Rules:
+        - SELECT only. No DDL, no DML.
+        - Always qualify tables as `fe_race10.<name>`.
+        - Use LIMIT clauses to keep result sets small (LIMIT 100 or less).
+
+toolsets:
+  race-engineer:
+    - get_driver_info
+    - get_lap_history
+    - get_top_speed_history
+    - get_energy_curve
+    - get_recent_race_control
+    - get_am_activations
+    - get_am_armings
+    - get_overtakes_involving
+    - get_driver_career_stats
+    - get_field_position_at_lap
+    - get_lap_time_windows
+    - bigquery_list_table_ids
+    - bigquery_get_table_info
+    - execute_sql_bq

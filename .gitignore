@@ -1,0 +1,49 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Type checkers
+.mypy_cache/
+.ruff_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# Local env
+.env
+.envrc
+
+# Cloud Shell editor scratch
+*.swp
+.DS_Store
+
+# Misc
+.venv/
+.adk/
+
+deploy/.engine_resource
+
+stage_transcripts/
+
+# adk create writes a per-project .env into the student agent folder
+starter/race_engineer/.env

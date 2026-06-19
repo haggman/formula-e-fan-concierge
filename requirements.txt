@@ -1,0 +1,37 @@
+# Formula E Race Engineer Agent — Python dependencies
+#
+# Installed into .venv/ by ./activate. Most packages use minimum-version
+# floors and let pip resolve compatible versions. The two pins below are
+# strict because their protocol/API surface affects our integration.
+
+# --- BigQuery (chunk 2) ---
+google-cloud-bigquery>=3.27
+google-cloud-storage>=2.18
+
+# --- Toolbox client SDK (chunks 3, 6) ---
+# Strict pin: must match server protocol surface.
+toolbox-core==1.1.0
+
+# --- Agent state (chunk 5) ---
+pydantic>=2.5,<3
+google-cloud-firestore>=2.19
+
+# --- ADK + Agent Engine (chunks 6, 12) ---
+# Strict pin: ADK agent definition API changed in 1.x.
+google-adk[toolbox]>=1.0,<2
+google-cloud-aiplatform[adk,agent_engines]>=1.70
+
+# --- Frontend (chunk 9) ---
+fastapi>=0.115
+uvicorn[standard]>=0.32
+google-cloud-pubsub>=2.25
+
+# --- Voice (chunks 10, 11) ---
+google-cloud-texttospeech>=2.20
+google-cloud-speech>=2.26
+
+# --- Utilities ---
+python-dotenv>=1.0
+fastapi>=0.115
+uvicorn[standard]>=0.30
+httpx>=0.27

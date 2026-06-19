@@ -1,0 +1,11 @@
+# Web service
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.7.0
+
+# Live "now" plane
+google-cloud-firestore>=2.16.0
+
+# ADK agent (LLM mode) + A2A door (showcase). [a2a] pulls the A2A extras for to_a2a().
+google-adk[a2a]>=1.29.0
+google-cloud-aiplatform>=1.144.0

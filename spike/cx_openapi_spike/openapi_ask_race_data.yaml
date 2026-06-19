@@ -1,0 +1,57 @@
+# Trimmed, single-operation OpenAPI 3.0 schema to paste into the CX Agent Studio
+# OpenAPI tool. CX requires exactly ONE operation per tool — this file has one.
+# Replace SERVICE_URL with your deployed Cloud Run URL (no trailing slash),
+# e.g. https://race-data-stub-abc123-uc.a.run.app
+openapi: 3.0.0
+info:
+  title: Race-Data Subagent
+  version: "0.1.0"
+  description: Answers Formula E race-data questions, bounded to the replay's current moment.
+servers:
+  - url: SERVICE_URL
+paths:
+  /ask_race_data:
+    post:
+      operationId: ask_race_data
+      summary: Ask a race-data question about the Berlin 2024 E-Prix replay.
+      description: >
+        Answers a fan's race or statistics question, bounded to the replay's
+        current moment (time-honest — never reveals what hasn't happened yet).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              properties:
+                question:
+                  type: string
+                  description: The fan's race-data question.
+      responses:
+        "200":
+          description: The agent's answer.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  answer:
+                    type: string
+                    description: The answer, bounded to the current moment.
+                  race_time_s:
+                    type: number
+                    description: Replay seconds since green flag.
+                  race_wall_time_ns:
+                    type: integer
+                    format: int64
+                    description: Computed 2024 wall-clock ns of the current moment.
+                  now_source:
+                    type: string
+                    description: "'firestore' (live) or 'canned' (fallback)."
+                  refused_future:
+                    type: boolean
+                    description: True if a future/spoiler question was refused.
+                  mode:
+                    type: string
+                    description: "'deterministic' or 'llm'."

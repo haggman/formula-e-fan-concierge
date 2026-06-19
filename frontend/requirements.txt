@@ -1,0 +1,15 @@
+# Frontend container dependencies (chunk 13) — engine mode only.
+#
+# Deliberately SLIM: no google-adk, no toolbox-core. The deployed frontend
+# runs AGENT_MODE=engine and talks to Agent Engine via the aiplatform SDK;
+# the agent's own runtime lives on the engine. AGENT_MODE=local inside this
+# container is unsupported by design (LocalAgentClient's deferred imports
+# would fail) — local mode is the Cloud Shell dev path.
+fastapi>=0.115
+uvicorn[standard]>=0.32
+httpx>=0.27
+pydantic>=2.5,<3
+google-cloud-firestore>=2.19
+google-cloud-texttospeech>=2.20
+google-cloud-speech>=2.26
+google-cloud-aiplatform[agent_engines]>=1.70

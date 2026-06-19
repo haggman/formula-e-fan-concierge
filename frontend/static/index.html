@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Race Engineer — Car 13</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --line: #30363d;
+    --text: #e6edf3; --dim: #8b949e;
+    --accent: #58a6ff; --us: #1f6feb33;
+    --am: #f0883e; --ok: #3fb950; --warn: #d29922; --bad: #f85149;
+    --lap-a: #58a6ff; --lap-b: #d2a8ff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 14px/1.45 "SF Mono", "Cascadia Code", Consolas, monospace;
+    height: 100vh; display: flex; flex-direction: column;
+  }
+  header {
+    display: flex; align-items: baseline; gap: 16px;
+    padding: 10px 16px; border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 15px; font-weight: 600; }
+  header .phase { color: var(--accent); text-transform: uppercase; font-size: 12px; }
+  header .clock { margin-left: auto; color: var(--dim); }
+  header .conn { font-size: 11px; }
+  #audio-toggle {
+    background: var(--panel); border: 1px solid var(--line); color: var(--text);
+    font: inherit; font-size: 11px; padding: 3px 10px; border-radius: 4px; cursor: pointer;
+  }
+  #audio-toggle.muted { color: var(--dim); }
+  #audio-toggle.live { border-color: var(--ok); color: var(--ok); }
+  header .conn.ok { color: var(--ok); } header .conn.down { color: var(--bad); }
+
+  main { flex: 1; display: grid; grid-template-columns: 300px 1fr; min-height: 0; }
+
+  /* Position tower */
+  #tower { border-right: 1px solid var(--line); overflow-y: auto; padding: 8px 0; }
+  .row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 3px 12px; border-left: 3px solid transparent;
+  }
+  .row.us { background: var(--us); border-left-color: var(--accent); }
+  .row.retired { opacity: 0.35; text-decoration: line-through; }
+  .row .pos { width: 30px; color: var(--dim); text-align: right; }
+  .row.us .pos { color: var(--accent); font-weight: 700; }
+  .row .num { width: 34px; color: var(--dim); }
+  .row .drv { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .ambadge {
+    font-size: 10px; padding: 1px 6px; border-radius: 8px;
+    border: 1px solid var(--am); color: var(--am); visibility: hidden;
+  }
+  .row .ambadge.on { visibility: visible; background: var(--am); color: #000; }
+  .row .pips { color: var(--dim); font-size: 11px; letter-spacing: 2px; }
+
+  /* Right column */
+  #right { display: flex; flex-direction: column; min-height: 0; }
+  #ourpanel {
+    display: flex; align-items: center; justify-content: space-around;
+    gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line);
+  }
+  .cluster { text-align: center; }
+  .cluster .label { font-size: 11px; color: var(--dim); text-transform: uppercase; margin-top: 4px; }
+  .bigstat { font-size: 34px; font-weight: 700; line-height: 1.1; }
+  .delta { font-size: 13px; font-weight: 600; visibility: hidden; }
+  .delta.up { visibility: visible; color: var(--ok); }
+  .delta.down { visibility: visible; color: var(--bad); }
+  #amstat .bigstat { font-size: 20px; padding-top: 8px; }
+  #regen {
+    font-size: 11px; font-weight: 700; color: var(--ok);
+    letter-spacing: 1px; visibility: hidden; margin-top: -6px;
+  }
+  #regen.on { visibility: visible; }
+  #amstat.amon .bigstat { color: var(--am); }
+  svg text { fill: var(--text); font-family: inherit; }
+  .gauge-track, .ring-track { stroke: var(--line); fill: none; }
+  .gauge-arc, .ring-arc { fill: none; stroke-linecap: round; }
+  .gauge-arc { transition: stroke-dashoffset .6s, stroke .6s; }
+  .ring-arc { transition: stroke-dashoffset .6s; }
+  .needle { stroke: var(--text); stroke-width: 2; }
+
+  /* Radio log */
+  #radiolog { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
+  .call { max-width: 720px; }
+  .call .meta { font-size: 11px; color: var(--dim); margin-bottom: 2px; }
+  .call .meta .tag { color: var(--am); }
+  .call .text { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; }
+  .call.qa .text { border-color: var(--accent); }
+  .call.question { align-self: flex-end; }
+  .call.question .text { border-color: var(--accent); background: var(--us); }
+  .call.question .meta { text-align: right; }
+  #pending { color: var(--dim); font-style: italic; display: none; }
+  #placeholder { color: var(--dim); font-style: italic; }
+
+  #askbar { display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); }
+  #askbar input {
+    flex: 1; background: var(--panel); border: 1px solid var(--line);
+    color: var(--text); padding: 8px 12px; border-radius: 6px; font: inherit;
+  }
+  #askbar button {
+    background: var(--accent); border: 0; color: #000; font: inherit;
+    padding: 8px 18px; border-radius: 6px; cursor: pointer;
+  }
+  #mic {
+    background: var(--panel); border: 1px solid var(--line); color: var(--text);
+    user-select: none;
+  }
+  #mic.rec { background: var(--bad); border-color: var(--bad); color: #fff; }
+  #mic.busy { opacity: 0.5; }
+
+  /* Pit-wall systems bar */
+  #simbar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 16px; border-top: 1px solid var(--line);
+    font-size: 11px; color: var(--dim);
+  }
+  #simbar .sim-label { letter-spacing: 2px; font-weight: 700; }
+  #simbar button, #simbar select {
+    background: var(--panel); border: 1px solid var(--line); color: var(--text);
+    font: inherit; font-size: 11px; padding: 3px 10px; border-radius: 4px; cursor: pointer;
+  }
+  #simbar button:hover { border-color: var(--dim); }
+  #simbar label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  #sim-msg { margin-left: auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>RACE ENGINEER — CAR 13 · DA COSTA</h1>
+  <span class="phase" id="phase">—</span>
+  <span class="clock" id="clock">t=—</span>
+  <button id="audio-toggle" class="muted">🔇 MUTED</button>
+  <span class="conn down" id="conn">● connecting</span>
+</header>
+<main>
+  <div id="tower"></div>
+  <div id="right">
+    <div id="ourpanel">
+      <div class="cluster">
+        <div class="bigstat"><span id="s-pos">—</span> <span class="delta" id="s-delta"></span></div>
+        <div class="label">Position</div>
+      </div>
+      <div class="cluster">
+        <svg width="90" height="90" viewBox="0 0 90 90">
+          <circle class="ring-track" id="lapring-bg" cx="45" cy="45" r="36" stroke-width="6"/>
+          <circle class="ring-arc" id="lapring" cx="45" cy="45" r="36" stroke-width="6"
+                  stroke="var(--accent)" stroke-dasharray="226.2" stroke-dashoffset="226.2"
+                  transform="rotate(-90 45 45)"/>
+          <text id="s-lap" x="45" y="50" text-anchor="middle" font-size="24" font-weight="700">—</text>
+        </svg>
+        <div class="label">Lap</div>
+      </div>
+      <div class="cluster">
+        <svg width="200" height="115" viewBox="0 0 200 115">
+          <path class="gauge-track" d="M 20 100 A 80 80 0 0 1 180 100" stroke-width="10"/>
+          <path class="gauge-arc" id="energyarc" d="M 20 100 A 80 80 0 0 1 180 100"
+                stroke-width="10" stroke="var(--ok)"
+                stroke-dasharray="251.3" stroke-dashoffset="251.3"/>
+          <line class="needle" id="needle" x1="100" y1="100" x2="100" y2="34"
+                transform="rotate(-90 100 100)"/>
+          <circle cx="100" cy="100" r="5" fill="var(--text)"/>
+          <text id="s-energy" x="100" y="92" text-anchor="middle" font-size="20" font-weight="700">—</text>
+        </svg>
+        <div id="regen">▲ REGEN</div>
+        <div class="label">Energy %</div>
+      </div>
+      <div class="cluster" id="amstat">
+        <div class="bigstat" id="s-am">—</div>
+        <div class="label">Attack Mode</div>
+      </div>
+    </div>
+    <div id="radiolog"><div id="placeholder">Radio silence — waiting for the engineer…</div><div id="pending">engineer is checking…</div></div>
+    <div id="askbar">
+      <input id="question" placeholder="Ask your engineer… (or hold SPACE to talk)">
+      <button id="mic" title="Hold to talk (or hold Space outside the text box)">🎤</button>
+      <button id="ask">ASK</button>
+    </div>
+    <div id="simbar">
+      <span class="sim-label">SIM</span>
+      <button id="sim-restart">RESTART</button>
+      <button id="sim-pause">PAUSE</button>
+      <select id="sim-speed">
+        <option value="1">1×</option>
+        <option value="2">2×</option>
+        <option value="5">5×</option>
+      </select>
+      <label><input type="checkbox" id="sim-loop"> LOOP</label>
+      <button id="sim-finish" title="Jump to ~10s before the flag">FINISH</button>
+      <span id="sim-msg"></span>
+    </div>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+// Driver surname map — GENERATED from fe_race10.drivers (pre_push_patch.py).
+// The frozen 2024 entry list; surnames match what the radio voice says.
+const DRIVERS = {
+  "DEN": { last: "Dennis", full: "Jake Dennis" },
+  "VAN": { last: "Vandoorne", full: "Stoffel Vandoorne" },
+  "SET": { last: "Sette C\u00e2mara", full: "S\u00e9rgio Sette C\u00e2mara" },
+  "ERI": { last: "Eriksson", full: "Joel Eriksson" },
+  "HUG": { last: "Hughes", full: "Jake Hughes" },
+  "GUE": { last: "G\u00fcnther", full: "Maximilian G\u00fcnther" },
+  "BAR": { last: "Barnard", full: "Taylor Barnard" },
+  "EVA": { last: "Evans", full: "Mitch Evans" },
+  "DIG": { last: "Di Grassi", full: "Lucas Di Grassi" },
+  "DAC": { last: "Da Costa", full: "Ant\u00f3nio F\u00e9lix Da Costa" },
+  "ARO": { last: "Aron", full: "Paul Aron" },
+  "NAT": { last: "Nato", full: "Norman Nato" },
+  "DAR": { last: "Daruvala", full: "Jehan Daruvala" },
+  "KIN": { last: "King", full: "Jordan King" },
+  "ROW": { last: "Rowland", full: "Oliver Rowland" },
+  "FEN": { last: "Fenestraz", full: "Sacha Fenestraz" },
+  "JEV": { last: "Vergne", full: "Jean-\u00c9ric Vergne" },
+  "TIC": { last: "Ticktum", full: "Dan Ticktum" },
+  "CAS": { last: "Cassidy", full: "Nick Cassidy" },
+  "MOR": { last: "Mortara", full: "Edoardo Mortara" },
+  "VDL": { last: "Van Der Linde", full: "Kelvin Van Der Linde" },
+  "WEH": { last: "Wehrlein", full: "Pascal Wehrlein" },
+};
+const GAUGE_LEN = 251.3;   // semicircle arc length (r=80)
+const RING_LEN = 226.2;    // lap ring circumference (r=36)
+
+function fmtClock(s) {
+  const m = Math.floor(s / 60), ss = String(Math.floor(s % 60)).padStart(2, "0");
+  return `t=${m}:${ss}`;
+}
+
+// Lap-progress + position-delta tracking (client-side; calibrates after
+// the first observed lap boundary)
+let lapSeen = null, lapStartT = null, lapDuration = null, posAtLapStart = null;
+let prevEnergy = null;
+let ringLap = null;  // lap the ring is currently painting
+const REGEN_THRESHOLD = 0.05;  // % rise per sample before we call it regen
+const DEFAULT_LAP_S = 66;      // Berlin green-flag lap, until the ring calibrates
+
+function renderState(msg) {
+  $("phase").textContent = msg.race_phase.replace(/_/g, " ");
+  $("clock").textContent = fmtClock(msg.race_time_s);
+
+  const tower = $("tower");
+  tower.innerHTML = "";
+  for (const c of msg.cars) {
+    const row = document.createElement("div");
+    row.className = "row" + (c.us ? " us" : "") + (c.retired ? " retired" : "");
+    row.innerHTML =
+      `<span class="pos">P${c.position}</span>` +
+      `<span class="num">#${c.car}</span>` +
+      `<span class="drv">${(DRIVERS[c.driver] || {}).last || c.driver || "—"}</span>` +
+      `<span class="ambadge${c.am_active ? " on" : ""}">AM</span>` +
+      `<span class="pips">${"●".repeat(c.am_used)}${"○".repeat(Math.max(0, 2 - c.am_used))}</span>`;
+    tower.appendChild(row);
+  }
+
+  const o = msg.our;
+  if (!o) return;
+
+  // --- lap boundary bookkeeping ---
+  if (lapSeen !== null && o.lap < lapSeen) {
+    // lap went BACKWARDS: the sim was restarted under us — flush all tracking
+    lapSeen = null; lapStartT = null; lapDuration = null;
+    posAtLapStart = null; prevEnergy = null;
+  }
+  if (lapSeen !== null && o.lap > lapSeen) {
+    if (lapStartT !== null) lapDuration = msg.race_time_s - lapStartT;
+    lapStartT = msg.race_time_s;
+    posAtLapStart = o.position;
+  } else if (lapSeen === null && o.lap >= 1 && msg.race_time_s >= 0) {
+    // start tracking at the green flag, not during the pre-race countdown —
+    // calibrating from t≈-10s made lap 1 fill early and sit
+    lapSeen = o.lap; lapStartT = msg.race_time_s; posAtLapStart = o.position;
+  }
+  if (lapSeen !== null) lapSeen = o.lap;
+
+  // position + delta vs lap start
+  $("s-pos").textContent = "P" + o.position;
+  const d = posAtLapStart !== null ? posAtLapStart - o.position : 0;
+  const deltaEl = $("s-delta");
+  deltaEl.className = "delta" + (d > 0 ? " up" : d < 0 ? " down" : "");
+  deltaEl.textContent = d > 0 ? `▲${d}` : d < 0 ? `▼${-d}` : "";
+
+  // lap ring — current lap's color sweeps over the previous lap's
+  $("s-lap").textContent = o.lap;
+  let progress = 0;
+  if (lapStartT !== null) {
+    progress = Math.max(0, Math.min(1,
+      (msg.race_time_s - lapStartT) / (lapDuration || DEFAULT_LAP_S)));
+  }
+  const lapColor = l => l % 2 ? "var(--lap-a)" : "var(--lap-b)";
+  const ring = $("lapring");
+  if (ringLap !== o.lap) {
+    // lap boundary: snap to empty in the new color with NO animation,
+    // so the new sweep starts from zero instead of visibly retracting
+    ring.style.transition = "none";
+    ring.style.stroke = lapColor(o.lap);
+    ring.style.strokeDashoffset = RING_LEN;
+    ring.getBoundingClientRect();  // force reflow before re-enabling
+    ring.style.transition = "";
+    ringLap = o.lap;
+  }
+  $("lapring-bg").style.stroke = o.lap > 1 && lapDuration ? lapColor(o.lap - 1) : "var(--line)";
+  ring.style.strokeDashoffset = RING_LEN * (1 - progress);
+
+  // energy gauge
+  const pct = Math.max(0, Math.min(100, o.energy_pct));
+  $("s-energy").textContent = pct.toFixed(1);
+  const color = pct > 40 ? "var(--ok)" : pct > 20 ? "var(--warn)" : "var(--bad)";
+  const arc = $("energyarc");
+  arc.style.strokeDashoffset = GAUGE_LEN * (1 - pct / 100);
+  arc.style.stroke = color;
+  $("needle").setAttribute("transform", `rotate(${-90 + 180 * pct / 100} 100 100)`);
+  $("regen").classList.toggle("on", prevEnergy !== null && pct - prevEnergy > REGEN_THRESHOLD);
+  prevEnergy = pct;
+
+  // attack mode
+  $("s-am").textContent = o.am_active ? "ACTIVE" : `${o.am_used}/2`;
+  $("amstat").classList.toggle("amon", o.am_active);
+}
+
+// --- radio audio: sequential playback queue (one mouth, one speaker) ---
+let audioEnabled = false;
+const audioQueue = [];
+let audioPlaying = false;
+
+function drainAudio() {
+  if (audioPlaying || !audioEnabled || audioQueue.length === 0) return;
+  audioPlaying = true;
+  const el = new Audio("data:audio/mp3;base64," + audioQueue.shift());
+  el.onended = el.onerror = () => { audioPlaying = false; drainAudio(); };
+  el.play().catch(() => { audioPlaying = false; });
+}
+
+$("audio-toggle").onclick = () => {
+  audioEnabled = !audioEnabled;
+  const b = $("audio-toggle");
+  b.className = audioEnabled ? "live" : "muted";
+  b.textContent = audioEnabled ? "🔊 LIVE AUDIO" : "🔇 MUTED";
+  if (!audioEnabled) audioQueue.length = 0;  // muting clears the backlog
+  // the click itself is the user gesture that unlocks browser autoplay
+};
+
+function addRadioCall(msg) {
+  if (msg.audio && audioEnabled) { audioQueue.push(msg.audio); drainAudio(); }
+  const ph = $("placeholder"); if (ph) ph.remove();
+  const pending = $("pending");
+  if (msg.kind === "qa") pending.style.display = "none";
+  const div = document.createElement("div");
+  const cls = msg.kind === "qa" ? " qa" : msg.kind === "question" ? " question" : "";
+  div.className = "call" + cls;
+  const who = msg.kind === "question" ? "YOU · " : "";
+  div.innerHTML =
+    `<div class="meta">${who}${fmtClock(msg.race_time_s)} · lap ${msg.lap}` +
+    (msg.kind && msg.kind !== "qa" && msg.kind !== "question"
+      ? ` · <span class="tag">${msg.kind}</span>` : "") +
+    (msg.secs != null ? ` · ${msg.secs}s` : "") +
+    (msg.tools != null ? ` · ${msg.tools} tool${msg.tools === 1 ? "" : "s"}` : "") +
+    `</div><div class="text">${msg.text}</div>`;
+  const log = $("radiolog");
+  log.insertBefore(div, pending);
+  if (msg.kind === "question") pending.style.display = "block";
+  log.scrollTop = log.scrollHeight;
+}
+
+function sendQuestion() {
+  const input = $("question");
+  const q = input.value.trim();
+  if (!q || !ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ type: "ask", question: q }));
+  input.value = "";
+}
+$("ask").onclick = sendQuestion;
+$("question").addEventListener("keydown", e => { if (e.key === "Enter") sendQuestion(); });
+
+// --- simulator controls ---
+async function simCall(action, payload) {
+  const msg = $("sim-msg");
+  try {
+    const r = await fetch(`/api/sim/${action}`, {
+      method: action === "config" ? "GET" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload ? JSON.stringify(payload) : undefined,
+    });
+    if (!r.ok) throw new Error(await r.text());
+    msg.textContent = "";
+    return await r.json();
+  } catch (e) {
+    msg.textContent = "sim: " + (e.message || "unreachable").slice(0, 80);
+    return null;
+  }
+}
+
+let simPaused = false;
+function setPauseLabel() { $("sim-pause").textContent = simPaused ? "RESUME" : "PAUSE"; }
+
+async function initSimBar() {
+  const cfg = await simCall("config");
+  if (!cfg) return;
+  const speeds = [1, 2, 5];
+  const nearest = speeds.reduce((a, b) =>
+    Math.abs(b - cfg.speed_multiplier) < Math.abs(a - cfg.speed_multiplier) ? b : a);
+  $("sim-speed").value = String(nearest);
+  $("sim-loop").checked = !!cfg.auto_restart;
+  simPaused = !!cfg.paused;
+  setPauseLabel();
+}
+
+$("sim-restart").onclick = async () => { await simCall("restart"); initSimBar(); };
+$("sim-pause").onclick = async () => {
+  const r = await simCall(simPaused ? "resume" : "pause");
+  if (r) { simPaused = !!r.paused; setPauseLabel(); }
+};
+$("sim-speed").onchange = e => simCall("speed", { multiplier: Number(e.target.value) });
+$("sim-loop").onchange = e => simCall("auto-restart", { enabled: e.target.checked });
+$("sim-finish").onclick = async () => { await simCall("finish"); initSimBar(); };
+initSimBar();
+
+// --- push-to-talk: hold the mic button, or hold Space outside the input ---
+let micStream = null, recorder = null, recChunks = [], recording = false;
+
+async function pttStart() {
+  if (recording) return;
+  try {
+    micStream = micStream || await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch {
+    $("mic").textContent = "🚫"; $("mic").title = "Microphone blocked by the browser";
+    return;
+  }
+  recording = true;
+  recChunks = [];
+  recorder = new MediaRecorder(micStream);
+  recorder.ondataavailable = e => { if (e.data.size) recChunks.push(e.data); };
+  recorder.onstop = sendRecording;
+  recorder.start();
+  $("mic").classList.add("rec");
+  $("mic").textContent = "● REC";
+}
+
+function pttStop() {
+  if (!recording) return;
+  recording = false;
+  recorder.stop();
+  $("mic").classList.remove("rec");
+  $("mic").textContent = "🎤";
+}
+
+async function sendRecording() {
+  const blob = new Blob(recChunks, { type: recorder.mimeType });
+  if (blob.size < 1000) return;  // a tap, not speech
+  const mic = $("mic");
+  mic.classList.add("busy"); mic.textContent = "…";
+  try {
+    const r = await fetch("/api/stt", { method: "POST", body: blob });
+    if (!r.ok) throw new Error();
+    const { transcript } = await r.json();
+    if (transcript) {
+      $("question").value = transcript;        // let the audience see what was heard
+      setTimeout(sendQuestion, 600);           // then it goes to the engineer
+    }
+  } catch {
+    $("question").placeholder = "Didn't catch that — try again or type";
+  } finally {
+    mic.classList.remove("busy"); mic.textContent = "🎤";
+  }
+}
+
+$("mic").addEventListener("mousedown", pttStart);
+$("mic").addEventListener("touchstart", e => { e.preventDefault(); pttStart(); });
+for (const ev of ["mouseup", "mouseleave", "touchend"])
+  $("mic").addEventListener(ev, pttStop);
+
+document.addEventListener("keydown", e => {
+  if (e.code === "Space" && !e.repeat && document.activeElement !== $("question")) {
+    e.preventDefault();  // don't scroll the page
+    pttStart();
+  }
+});
+document.addEventListener("keyup", e => {
+  if (e.code === "Space" && document.activeElement !== $("question")) {
+    e.preventDefault();
+    pttStop();
+  }
+});
+
+let ws, retry = 1000;
+function connect() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = () => { $("conn").textContent = "● live"; $("conn").className = "conn ok"; retry = 1000; };
+  ws.onmessage = e => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === "state") renderState(msg);
+    else if (msg.type === "radio") addRadioCall(msg);
+  };
+  ws.onclose = () => {
+    $("conn").textContent = "● reconnecting"; $("conn").className = "conn down";
+    setTimeout(connect, retry); retry = Math.min(retry * 2, 10000);
+  };
+}
+connect();
+</script>
+</body>
+</html>

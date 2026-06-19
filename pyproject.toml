@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "formula-e-fan-concierge"
+version = "0.1.0"
+description = "Formula E Race-Day Companion — Challenge 1 (forks the Challenge 2 chassis)"
+requires-python = ">=3.10"
+
+# Dependencies live in requirements.txt for venv setup; this file just makes
+# our own packages installable so cross-package imports work.
+#
+# Three student-built agent packages, each in starter/ (blanks) and solution/
+# (reference): commentator, cx_concierge, race_data_subagent. See README.md.
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["shared*", "solution*", "starter*", "state_writer*"]
+exclude = [".venv*", "toolbox*", "notebooks*", "scripts*", "deploy*", "simulator*", "build*"]
