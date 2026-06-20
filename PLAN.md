@@ -205,10 +205,10 @@ Each is its own focused conversation; this doc + `spec/` are the shared referenc
 | # | Conversation | Status | Notes / depends on |
 |---|---|---|---|
 | 1 | **Architecture & infra reuse** | ✅ done | repo skeleton, transport, scopes locked; `spec/` |
-| 2 | **CX integration spike** | ⏭ next | validates MCP-tool wire; **gates** #3, #5; `spec/cx_integration_spike.md` |
-| 3 | **`race_data_subagent` build** | blocked by #2 | ADK + MCP server, Firestore "now" + BQ "then", time-honest |
+| 2 | **CX integration spike** | ✅ done (validated live) | wire = CX OpenAPI tool → ADK on Cloud Run (`POST /ask_race_data`); ref `spike/cx_openapi_spike/`; `spec/cx_integration_spike.md` |
+| 3 | **`race_data_subagent` build** | ⏭ ready (unblocked) | ADK + Toolbox/BQ + real `now_tools`, time-honest; Cloud Run via `get_fast_api_app()` + `POST /ask_race_data`; private deploy + `run.invoker` to `gcp-sa-ces` |
 | 4 | **`commentator` build** | parallel-ready | ADK, field-wide + selected-car focus, TTS; needs #9 |
-| 5 | **`cx_concierge` build** | blocked by #2, fed by #6 | CX low-code, MCP tool → subagent, data stores, Google Search |
+| 5 | **`cx_concierge` build** | ⏭ ready (unblocked), fed by #6 | CX OpenAPI tool → subagent; data stores + Google Search; **grounding must force answers only from the subagent** (stub made the LLM hallucinate positions) |
 | 6 | **Knowledge base & RAG** | parallel-ready | author rules pack + team/driver profiles; Vertex AI Search; feeds #5 |
 | 7 | **Frontend adaptation** | parallel-ready | map + car-select + stats panel + CX widget; selection over websocket |
 | 8 | **State writer → Worker Pool** | parallel-ready | spec'd; implement + confirm `gcloud` verb; `spec/state_writer_worker_pool.md` |
@@ -221,24 +221,17 @@ Each is its own focused conversation; this doc + `spec/` are the shared referenc
 
 ## 8. Sequencing — order of the next conversations
 
-**First: the CX integration spike (#2).** It's the one true blocker — it validates the MCP-tool
-wire and therefore gates the subagent (#3) and the CX build (#5). Run it alone, next.
+**Done: the CX integration spike (#2)** — the one true blocker is retired; the wire is validated (CX OpenAPI tool → ADK on Cloud Run). #3 and #5 are now unblocked.
 
-**Then, in parallel** (the team-split payoff):
+**Now in parallel** (the team-split payoff), Patrick is running one spin-off at a time:
 
-- **Track A — the data/agent spine:** #3 `race_data_subagent` (after the spike) → #5
-  `cx_concierge`, with **#6 Knowledge-Base & RAG running just ahead of / alongside #5** since it
-  feeds the concierge's grounding.
-- **Track B — the live spine (independent of the spike, spec'd):** #9 `frame_tools`/`scorer`
-  re-aim → #4 `commentator`; plus #8 state-writer Worker Pool whenever convenient.
-- **Track C — surface:** #7 frontend adaptation, once the agents emit messages and the selection
-  model is fixed; #12 `architecture.svg` anytime.
+- **Track A — the data/agent spine:** #3 `race_data_subagent` (build it per the spike's reference impl) → #5 `cx_concierge`, with **#6 Knowledge-Base & RAG running just ahead of / alongside #5** since it feeds the concierge's grounding. (Grounding is now a known must-do: the stub showed the CX LLM will hallucinate from training data unless instructed to answer only from the subagent.)
+- **Track B — the live spine (fully spec'd, independent):** #9 `frame_tools`/`scorer` re-aim → #4 `commentator`; plus #8 state-writer Worker Pool whenever convenient.
+- **Track C — surface:** #7 frontend adaptation, once the agents emit messages and the selection model is fixed; #12 `architecture.svg` anytime.
 
 **Last: #10 doc suite & run of show** — needs the build settled.
 
-Suggested immediate move: spin off **#2, the CX spike** (seed it from
-`spec/cx_integration_spike.md`). Tracks B and C can start in parallel since they don't depend on
-the spike.
+Suggested next move (Patrick's pick): either **#3 `race_data_subagent`** (the spike hands it a working reference) or resume **Track B** (the `frame_tools`/`scorer` re-aim → commentator). One at a time.
 
 ---
 

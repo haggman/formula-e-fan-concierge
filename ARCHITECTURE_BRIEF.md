@@ -17,7 +17,7 @@ The architecture conversation ran. Outcomes (full detail in `spec/`):
   history) **vendoring** the kept Ch2 pieces. **Three parallel sub-packages** in `starter/` and
   `solution/`: **`commentator`** (ADK), **`cx_concierge`** (CX low-code), **`race_data_subagent`**
   (ADK). Skeleton is scaffolded; see `README.md` and `spec/architecture.md`.
-- **CX → subagent (#1) — REVISED 2026-06-19 (Patrick's review):** the subagent runs in the **Agent Engine runtime** (`adk deploy`), and CX reaches it as a tool **discovered through Agent Registry** over MCP — the native, on-platform path. (Earlier this session we'd chosen a hand-rolled StreamableHttp **MCP server on Cloud Run**; that's now the **fallback**, as a thin MCP facade in front of the Agent-Engine agent, if the Agent-Engine→CX wire isn't ready.) Order: Agent Engine + Registry (primary) → Cloud Run MCP facade (fallback) → OpenAPI (second fallback). **Agent-as-a-tool is NOT the backbone** (reuses an agent *inside* the CX app; Preview). The exact CX-facing wire is partly Preview, so the spike confirms it → `spec/cx_integration_spike.md`. Verified in current docs: `adk deploy` targets the AE runtime, and Agent Registry is "a centralized catalog for discovering, tracking, and managing all agents, tools, and **MCP servers**."
+- **CX → subagent (#1) — VALIDATED LIVE 2026-06-19 (spike done):** the subagent is an **ADK agent on Cloud Run that serves its own `POST /ask_race_data` OpenAPI endpoint** (via `get_fast_api_app()` — the agent *is* the service, no wrapper); CX reaches it with an **OpenAPI tool**, **Service Agent ID Token** auth (`run.invoker` on `service-{PROJECT_NUMBER}@gcp-sa-ces.iam.gserviceaccount.com`); ~7–9 s round trips run synchronously. Proven end to end in the CX simulator. _This overturns the earlier Agent-Engine + Registry idea I'd put here:_ **CX cannot consume Agent Registry / A2A** (no such tool type in the live CX menu — those are for an ADK code orchestrator or the Gemini Enterprise app), and **Agent Engine can't serve a custom OpenAPI path** (only the `reasoningEngines` API). Agent Engine deploy (auto-registers in Agent Registry) + an A2A door (`to_a2a`, ~1 line) are kept as an **optional showcase tier**, off the critical path. Ref impl `spike/cx_openapi_spike/`; full writeup `spec/cx_integration_spike.md`.
 - **Time-honesty (#2):** reuse the Ch2 clock bridge; subagent reads Firestore "now" first, then
   bounds every BigQuery call with `race_wall_time_ns`. Data range = **R10 + full 10-season
   career**, all bounded to the current moment (Patrick: all historical data fair game, up to now).
@@ -102,7 +102,7 @@ and a live path into Firestore "now." Students build the **backend agents**; the
    └─ frame_tools (field POV) + scorer (field, selected-boost) + TTS              map · car list ·
                                                                                   stats panel · CX chat]
 [CX orchestrator · Conversational Agents] ──► RAG data stores (profiles, rules) + Google Search
-        ├──► race-stats subagent · ADK/Agent Engine ──► toolbox ──► BigQuery (time-honest)
+        ├──► race-data subagent · ADK on Cloud Run (OpenAPI) ──► toolbox ──► BigQuery (time-honest)
         └──► live lookup ──► Firestore "now"   (the CORE CX↔live wire)
 ```
 
@@ -118,11 +118,7 @@ configured Connections), **OpenAPI tools**, **Python code tools**, **Client func
 
 What this means for us:
 - **CX → race-data subagent:** three candidate wires, in order of "documented & simple":
-  (1) **Agent as a tool**, (2) **MCP tools**, (3) **OpenAPI**. _(Superseded 2026-06-19: the
-  chosen primary is now **Agent Engine + Agent Registry → CX over MCP** — Agent Registry is a
-  real, current product that catalogs agents and MCP servers, not the "experimental/absent"
-  route this line first assumed. See the corrected "Resolved this session" block at the top and
-  `spec/cx_integration_spike.md`. This bullet is kept only as a record of the earlier reasoning.)_
+  (1) **Agent as a tool**, (2) **MCP tools**, (3) **OpenAPI**. _(Superseded — the live spike on 2026-06-19 settled it: the validated wire is the **CX OpenAPI tool → ADK agent on Cloud Run** (`POST /ask_race_data`). Both "native" candidates were disproven — CX can't consume Agent Registry/A2A, and Agent Engine can't serve a custom OpenAPI path. See the "Resolved this session" block at the top and `spec/cx_integration_spike.md`. This bullet is kept only as a record of the earlier reasoning.)_
 - **Profiles + rules:** **Data store / File search tools** (RAG) + **Google Search tool**.
 - **Recommended data design (resolves the "CX → Firestore directly?" question):** put an
   **intelligent race-data subagent behind CX** that owns **both** worlds — Firestore "now" +

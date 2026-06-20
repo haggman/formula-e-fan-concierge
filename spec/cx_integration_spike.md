@@ -45,7 +45,9 @@ Why OpenAPI and not the alternatives: it's GA, conceptually simple for a 3-hour 
 
 ### Execution mode (async)
 
-The subagent does multiple LLM + tool calls, so a round trip can exceed the ~5s **sync** ideal; CES guidance puts async/long-running at ~5–60s. **Observed in the spike:** a simulator turn took **6.747s** and CX handled it with no async configuration and no timeout (most of that was the orchestrator's own multi-step reasoning; the deterministic stub tool is sub-second). To exercise a genuine >5s **tool** round trip, switch the service to the real LLM agent (RUNBOOK Part 1 step 5) and re-test. No hard 5s tool ceiling was hit.
+The subagent does multiple LLM + tool calls, so a round trip can exceed the ~5s **sync** ideal; CES guidance puts async/long-running at ~5–60s. **Observed in the spike (LLM mode, validated 2026-06-19):** a simulator turn showed the `ask_race_data` **tool call taking 7.148s** (real model + live Firestore read), total turn 8.819s, and **CX handled it cleanly in the default synchronous configuration — no async setting, no timeout, no error.** So a genuine >5s *tool* round trip is tolerated as-is; the async/long-running setting is advisory headroom (helpful if latency climbs toward the ~60s range), not a hard requirement at ~7–9s. (Earlier "Request URL was unreachable – Internal Server Error" failures were **not** latency — they were a stub bug: a module-level session service with a fixed session id threw `AlreadyExistsError` on the 2nd+ request per warm instance. Fixed by a unique per-request session id. Lesson worth keeping for students: this is why "the tool test works but the agent call fails" — the test harness hits a cold first-request, the agent hits the warm instance.)
+
+**Note (grounding, for the cx_concierge build):** with the *stub* returning only the live moment, the CX orchestrator LLM embellished its final reply with ungrounded facts (driver name, position) from its own training knowledge. The real subagent must return those as data and the CX instructions/grounding must forbid the orchestrator from inventing the rest.
 
 ## Time-honesty mechanism (open #2 — resolved & validated)
 
