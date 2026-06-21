@@ -25,14 +25,17 @@ version-controlled; a Vertex AI Search data store is then pointed at it (next st
 
 ## Pipeline
 
-1. Author rules (`rules/`) — done. Upload them to the staging corpus too:
-   `gcloud storage cp rules/*.md gs://class-demo/formula-e/grounding/rules/`.
-2. Run `build_profiles.ipynb` in Colab Enterprise → new parquet + `.md` profiles written
-   to `gs://class-demo/formula-e/grounding/profiles/` (students consume these); also commit
-   the `.md` into `profiles/` for version control. The notebook's final cell **updates the
+1. Author rules (`rules/`) — done. Stage them to the corpus as **`.txt`** (Vertex AI Search
+   ingests TXT/PDF/HTML, not `.md`):
+   `for f in rules/*.md; do gcloud storage cp "$f" "gs://class-demo/formula-e/grounding/rules/$(basename "${f%.md}").txt"; done`
+2. Run `build_profiles.ipynb` in Colab Enterprise → parquet + `.md` (readable) + **`.txt`**
+   (ingestion) profiles + `profiles.jsonl` written to `gs://class-demo/formula-e/grounding/profiles/`;
+   commit the `.md` into `profiles/` for version control. The notebook's final cell **updates the
    dataset catalog** (`reference/data_manifest.json` + `data_dictionary.md`) idempotently,
-   backing both up to `reference/_backups/<ts>/` first, so the new assets are discoverable.
-3. **Index for CX:** point a **Vertex AI Search** data store at the `rules/` + `profiles/`
-   docs (unstructured); optionally load the parquet into BigQuery for structured use.
-4. The CX concierge attaches the data store via a **Data store / File search tool**, with
-   **Google Search** grounding for the long tail.
+   backing both up to `reference/_backups/<ts>/` first.
+3. **Index for CX (students, in the UI):** create a **Vertex AI Search** data store over
+   `gs://class-demo/formula-e/grounding/` and attach it to the concierge as a **Data store
+   tool** — full walkthrough in `../DATASTORE_SETUP.md`. (Instructor stages the corpus;
+   students do the data store + wiring as the grounding lesson.)
+4. The concierge combines the data store (bios/rules) + the race-data subagent (live/stats)
+   + **Google Search** (long tail), grounded so it answers only from those sources.
