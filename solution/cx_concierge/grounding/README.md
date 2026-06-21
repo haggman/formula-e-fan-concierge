@@ -25,14 +25,18 @@ version-controlled; a Vertex AI Search data store is then pointed at it (next st
 
 ## Pipeline
 
-1. Author rules (`rules/`) — done. Stage them to the corpus as **`.txt`** (Vertex AI Search
-   ingests TXT/PDF/HTML, not `.md`):
-   `for f in rules/*.md; do gcloud storage cp "$f" "gs://class-demo/formula-e/grounding/rules/$(basename "${f%.md}").txt"; done`
-2. Run `build_profiles.ipynb` in Colab Enterprise → parquet + `.md` (readable) + **`.txt`**
-   (ingestion) profiles + `profiles.jsonl` written to `gs://class-demo/formula-e/grounding/profiles/`;
-   commit the `.md` into `profiles/` for version control. The notebook's final cell **updates the
-   dataset catalog** (`reference/data_manifest.json` + `data_dictionary.md`) idempotently,
-   backing both up to `reference/_backups/<ts>/` first.
+1. Rules store sources — stage both to `grounding/rules/`:
+   - the **official FIA Season 10 regulation PDFs** (Sporting + Technical) from
+     https://www.fia.com/regulation/category/109 (authoritative depth; Layout Parser); and
+   - the concise authored pack as **`.txt`** (quick fan answers; Vertex AI Search ingests
+     TXT/PDF/HTML, not `.md`):
+     `for f in rules/*.md; do gcloud storage cp "$f" "gs://class-demo/formula-e/grounding/rules/$(basename "${f%.md}").txt"; done`
+2. Run `build_profiles.ipynb` in Colab Enterprise → **comprehensive** parquet + `.txt`
+   (ingestion) profiles for **all FE drivers + teams** + `profiles.jsonl`, written to
+   `gs://class-demo/formula-e/grounding/profiles/`; commit the `.txt` into `profiles/` for
+   version control. The notebook's final cell **updates the dataset catalog**
+   (`reference/data_manifest.json` + `data_dictionary.md`) idempotently, backing both up to
+   `reference/_backups/<ts>/` first.
 3. **Index for CX (students, in the UI):** create **two** Vertex AI Search data stores —
    **FE Rules** (over `grounding/rules/`) and **Driver & Team Profiles** (over
    `grounding/profiles/`) — and attach both to the concierge as a **Data store tool**. Full

@@ -16,13 +16,16 @@ stores, live/time-honest stats from the subagent, everything else from Search.
 
 ## Prerequisites (instructor has staged these)
 
-The grounding corpus is in GCS as **plain text** (Vertex AI Search ingests
-TXT/PDF/HTML/DOCX — **not** `.md`), split into two folders:
+The grounding corpus is staged in GCS (Vertex AI Search ingests TXT/PDF/HTML/DOCX —
+**not** `.md`), in two folders:
 
-- `class-demo/formula-e/grounding/rules/` — the FE rules pack (`*.txt`)
-- `class-demo/formula-e/grounding/profiles/` — driver + team profiles
-  (`drivers/*.txt`, `teams/*.txt`; the `.parquet`/`.jsonl` siblings are ignored
-  by document ingestion)
+- `class-demo/formula-e/grounding/rules/` — the **official FIA Season 10 regulation
+  PDFs** (Sporting + Technical) for authoritative depth, **plus** the concise authored
+  rules pack (`*.txt`) for quick fan answers.
+- `class-demo/formula-e/grounding/profiles/` — **comprehensive** driver + team profiles
+  (`drivers/*.txt`, `teams/*.txt`) — every FE driver in the career table and every team in
+  the 10-season results, not just the R10 field. (The `.parquet`/`.jsonl` siblings are
+  ignored by document ingestion.)
 
 APIs enabled: **Discovery Engine / AI Applications** and **Conversational Agents**.
 
@@ -47,16 +50,20 @@ Either way the steps are the same; do it once per store.
 3. Synchronization frequency: **One time** (the rules pack is a versioned doc, not a live feed).
 4. Select **Folder**, enter: `class-demo/formula-e/grounding/rules`
 5. Name: `FE Rules`.
-6. **Document processing / parser:** the default **digital parser** is correct — these
-   are plain-text files, so the Layout Parser (needed for structured PDFs like the
-   MLB rulebook) adds cost for no benefit here. Leave **chunking** on for RAG.
-7. **Create.** Ingestion runs in the background (fast — a handful of small docs).
+6. **Document processing / parser:** this folder holds the **FIA regulation PDFs**, so set the
+   **Layout Parser** (same choice as the MLB rulebook) — it preserves the section/clause
+   hierarchy that makes retrieval relevant on a structured regs document. The concise `.txt`
+   pack in the same folder parses fine under it too. Leave **chunking** on for RAG.
+   (Layout parsing adds a Document AI charge at ingestion only.)
+7. **Create.** Ingestion runs in the background.
 
 **Store B — Driver & Team Profiles**
 
 8. **+ New data store** again → **Cloud Storage** → **Unstructured / Documents** → **One time**.
 9. Folder: `class-demo/formula-e/grounding/profiles` (recurses into `drivers/` + `teams/`).
-10. Name: `Driver and Team Profiles`. Default digital parser, chunking on. **Create.**
+10. Name: `Driver and Team Profiles`. These are plain `.txt`, so the **default digital parser**
+    is right here (no Layout Parser needed). Chunking on. **Create.** (This is the larger
+    ingest — every FE driver + team — so it takes a bit longer.)
 
 > Note: importing from GCS does **not** carry Cloud Storage IAM — anyone with
 > data-store access can read the indexed content. Fine here (public 2024 race
