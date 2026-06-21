@@ -84,6 +84,36 @@ curl -s http://localhost:8080/openapi.json \
 `1715519045726000000 + race_time_s*1e9`; 3b → `"refused_future": true` and no
 outcome. `now_source` is `firestore` if the simulator is running, else `canned`.
 
+### 3.5 Park "now" mid-race (so the spoiler refusal is meaningful)
+
+Time-honesty is "honest up to whatever 'now' is." If the simulator has run to the
+end (or its last write was the final lap), the live `race_states` doc holds the
+**finish** — so "now" = race over, and the honest answer to "who wins?" is that
+DAC won. That's correct, but it doesn't *demonstrate* the refusal. To test it,
+park "now" at a mid-race moment first.
+
+**Recommended — jump + pause the live simulator** (the jumped frame is real and
+coherent; the BigQuery bound lines up with it):
+
+```bash
+export SIM_URL="$(gcloud run services describe fe-simulator --region "$REGION" --format='value(status.url)')"
+# (if fe-simulator is private, prepend:  -H "Authorization: Bearer $(gcloud auth print-identity-token)")
+curl -s -X POST "$SIM_URL/jump"  -H 'Content-Type: application/json' -d '{"race_time_s": 600}'  # ~10 min in
+sleep 3                                              # let it publish a frame at the new position
+curl -s -X POST "$SIM_URL/pause"                     # freeze "now" there
+curl -s "$SIM_URL/status"                            # confirm race_time_s ≈ 600, paused
+```
+
+Now re-run 3a/3b: car-13 questions return the mid-race state, and "who wins?" /
+"who's on the podium?" **refuse** (`refused_future: true`) because the finish is
+past "now". `/resume` to let the replay continue; `/restart` to start over.
+
+**Alternative — static seed, no simulator:** `python scripts/seed_test_state.py`
+writes a fixed mid-race frame (lap 21, ~50%, safety car, DAC P2). Use this when
+the sim isn't running; pause/stop the sim first so it doesn't overwrite the seed.
+(It seeds `race_states` only, not `race_events`, so "what just happened" returns
+nothing — fine for the spoiler test.)
+
 ## 4. Flip to the real agent (Firestore "now" + BigQuery "then", LLM)
 
 ```bash

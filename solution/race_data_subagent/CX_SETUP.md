@@ -38,7 +38,19 @@ First-time creation takes a few minutes, then the designer opens.
    **Tools**), then **+ Create / Add**.
 2. Tool type: **OpenAPI**.
 3. Name: `ask_race_data`.
-4. **Schema:** paste the contents of `openapi_ask_race_data.yaml` (appendix
+4. **Description** (this is what the orchestrator LLM reads to decide *when* to
+   call the tool — make it specific and time-honest):
+
+   > Authoritative source for Formula E race facts about the Berlin 2024 Round 10
+   > E-Prix replay and 10 seasons of driver/team history. Call it for any question
+   > about the live race right now (positions, standings, a car's speed, energy, or
+   > Attack Mode, recent overtakes or incidents) or recorded race and career
+   > statistics (lap times, top speeds, energy use, head-to-head overtakes, career
+   > wins/podiums/points). Answers are time-honest — bounded to the replay's current
+   > moment — so it never reveals results or events that haven't happened yet. Always
+   > use this tool for race facts rather than answering from your own knowledge.
+
+5. **Schema:** paste the contents of `openapi_ask_race_data.yaml` (appendix
    below), with `SERVICE_URL` replaced by your Cloud Run URL. It is intentionally
    a **single operation** — CX allows exactly one operation per OpenAPI tool.
 

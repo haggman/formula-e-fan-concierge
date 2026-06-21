@@ -206,7 +206,7 @@ Each is its own focused conversation; this doc + `spec/` are the shared referenc
 |---|---|---|---|
 | 1 | **Architecture & infra reuse** | ✅ done | repo skeleton, transport, scopes locked; `spec/` |
 | 2 | **CX integration spike** | ✅ done (validated live) | wire = CX OpenAPI tool → ADK on Cloud Run (`POST /ask_race_data`); ref `spike/cx_openapi_spike/`; `spec/cx_integration_spike.md` |
-| 3 | **`race_data_subagent` build** | ⏭ ready (unblocked) | ADK + Toolbox/BQ + real `now_tools`, time-honest; Cloud Run via `get_fast_api_app()` + `POST /ask_race_data`; private deploy + `run.invoker` to `gcp-sa-ces` |
+| 3 | **`race_data_subagent` build** | ✅ done (verified live 2026-06-20) | ADK + Toolbox/BQ + real `now_tools`, time-honest; Cloud Run via `get_fast_api_app()` (LLM) / plain FastAPI (deterministic) + `POST /ask_race_data`; private deploy + `run.invoker` to `gcp-sa-ces`. Deploy: `setup/7_deploy_subagent.sh`; verify: `deploy/RUNBOOK_race_data_subagent.md` (+ §3.5 mid-race jump/pause demo); CX wiring: `solution/race_data_subagent/CX_SETUP.md`. Live E2E confirmed: grounded live-moment answer + mid-race spoiler refusal |
 | 4 | **`commentator` build** | parallel-ready | ADK, field-wide + selected-car focus, TTS; needs #9 |
 | 5 | **`cx_concierge` build** | ⏭ ready (unblocked), fed by #6 | CX OpenAPI tool → subagent; data stores + Google Search; **grounding must force answers only from the subagent** (stub made the LLM hallucinate positions) |
 | 6 | **Knowledge base & RAG** | parallel-ready | author rules pack + team/driver profiles; Vertex AI Search; feeds #5 |
