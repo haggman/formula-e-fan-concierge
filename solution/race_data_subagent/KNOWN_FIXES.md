@@ -90,7 +90,30 @@ local harness didn't catch this because the sandbox has no `google-adk`
 installed, so the guard's `find_spec` short-circuited — worth deploying once, or
 installing google-adk locally, to exercise the real import path.)
 
-## 10. Two modes, and why deterministic exists
+## 10. LLM mode returns an empty body / "Expecting value" — Vertex location & model
+
+Symptom: deterministic mode works, but `DETERMINISTIC=0` returns an empty
+response (`curl | json.tool` → "Expecting value: line 1 column 1"). That's the
+agent run throwing before a body is written. Two causes we hit / guard against:
+
+- **Vertex location ≠ Cloud Run region.** Set `GOOGLE_CLOUD_LOCATION` to the
+  **model's** location (`global` for current Gemini, matching `activate.sh` and
+  the Ch2 engine), NOT the Cloud Run deploy region. The deploy script had set it
+  to `$REGION` (us-central1) — fixed to default `global` (override via env). A
+  region mismatch 404s every model call and only surfaces in LLM mode.
+- **Model availability.** `FE_MODEL=gemini-3.5-flash` must actually be enabled in
+  the project. If logs show NOT_FOUND/permission on the model, set
+  `FE_MODEL=gemini-2.5-flash` (the spike-validated model) and redeploy.
+
+The route now wraps the agent run: any failure logs a full traceback to Cloud
+Run and returns valid JSON with `mode="llm-error"` and an `error` field — so you
+get the real reason in the response instead of an empty body. Read it with:
+
+```bash
+gcloud run services logs read race-data-subagent --region "$REGION" --limit 80
+```
+
+## 11. Two modes, and why deterministic exists
 
 `DETERMINISTIC=1` (default) answers without the LLM/Vertex/Toolbox — it proves
 the CX → OpenAPI wire and the future-refusal end to end on a fresh project before

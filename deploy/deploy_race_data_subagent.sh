@@ -33,6 +33,12 @@ RACE_ID="${RACE_ID:-berlin_2024_r10}"
 DETERMINISTIC="${DETERMINISTIC:-1}"
 FE_MODEL="${FE_MODEL:-gemini-3.5-flash}"
 FE_STUB_RACE_TIME_S="${FE_STUB_RACE_TIME_S:-900}"
+# Vertex location for the model — DISTINCT from the Cloud Run deploy REGION.
+# Newer Gemini models are served from the 'global' endpoint (this is what
+# activate.sh and the Ch2 engine build use); pointing it at the Cloud Run region
+# (e.g. us-central1) 404s the model and only shows up in LLM mode. Override with
+# GOOGLE_CLOUD_LOCATION=... if your model lives in a specific region.
+GENAI_LOCATION="${GOOGLE_CLOUD_LOCATION:-global}"
 SUBAGENT_PACKAGE="${SUBAGENT_PACKAGE:-solution.race_data_subagent}"
 PKG_DIR="${SUBAGENT_PACKAGE//.//}"   # solution.race_data_subagent -> solution/race_data_subagent
 IMAGE="gcr.io/${PROJECT_ID}/${SERVICE}:latest"
@@ -96,7 +102,7 @@ gcloud builds submit . \
 # --- 4. Deploy private to Cloud Run ---
 echo ">>> Deploying to Cloud Run (private)..."
 ENV_VARS="PROJECT_ID=${PROJECT_ID},GOOGLE_CLOUD_PROJECT=${PROJECT_ID}"
-ENV_VARS="${ENV_VARS},GOOGLE_CLOUD_LOCATION=${REGION},GOOGLE_GENAI_USE_VERTEXAI=1"
+ENV_VARS="${ENV_VARS},GOOGLE_CLOUD_LOCATION=${GENAI_LOCATION},GOOGLE_GENAI_USE_VERTEXAI=1"
 ENV_VARS="${ENV_VARS},RACE_ID=${RACE_ID},DETERMINISTIC=${DETERMINISTIC}"
 ENV_VARS="${ENV_VARS},FE_MODEL=${FE_MODEL},FE_STUB_RACE_TIME_S=${FE_STUB_RACE_TIME_S}"
 [[ -n "$TOOLBOX_URL" ]] && ENV_VARS="${ENV_VARS},TOOLBOX_URL=${TOOLBOX_URL}"

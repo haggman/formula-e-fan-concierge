@@ -85,7 +85,8 @@ class AskResponse(BaseModel):
     race_wall_time_ns: int = Field(..., description="Computed 2024 wall-clock ns of 'now'.")
     now_source: str = Field(..., description="'firestore' (live) or 'canned' (fallback).")
     refused_future: bool = Field(..., description="True if a future/spoiler question was refused.")
-    mode: str = Field(..., description="'deterministic' or 'llm'.")
+    mode: str = Field(..., description="'deterministic', 'llm', or 'llm-error'.")
+    error: str | None = Field(None, description="Set only when the agent run failed (mode='llm-error').")
 
 
 # ---------------------------------------------------------------------------
@@ -198,13 +199,42 @@ async def _run_llm(question: str) -> dict:
     }
 
 
-@app.post("/ask_race_data", response_model=AskResponse, operation_id="ask_race_data")
+def _error_answer(question: str, exc: Exception) -> dict:
+    """Always return valid JSON, even when the agent run blows up. The full
+    traceback goes to Cloud Run logs (logger.exception below); CX gets a safe,
+    grounded-failure answer rather than an empty body / 500. mode='llm-error' is
+    the tell in the response that something failed."""
+    try:
+        now = read_now()
+    except Exception:  # noqa: BLE001
+        now = {"race_time_s": 0, "race_wall_time_ns": 0, "now_source": "unavailable"}
+    return {
+        "answer": "Sorry — I couldn't reach the race data just now. Please try again.",
+        "race_time_s": int(now.get("race_time_s", 0)),
+        "race_wall_time_ns": int(now.get("race_wall_time_ns", 0)),
+        "now_source": now.get("now_source", "unavailable"),
+        "refused_future": is_future_question(question),
+        "mode": "llm-error",
+        "error": f"{type(exc).__name__}: {exc}",
+    }
+
+
+@app.post(
+    "/ask_race_data",
+    response_model=AskResponse,
+    response_model_exclude_none=True,  # keep success responses clean (no error:null)
+    operation_id="ask_race_data",
+)
 async def ask_race_data_route(req: AskRequest) -> AskResponse:
     """The single operation CX's OpenAPI tool calls. One race-data question,
     answered bounded to the replay's current moment (time-honest)."""
     if DETERMINISTIC:
         return AskResponse(**deterministic_answer(req.question))
-    return AskResponse(**await _run_llm(req.question))
+    try:
+        return AskResponse(**await _run_llm(req.question))
+    except Exception as exc:  # noqa: BLE001 — never return an empty body to CX
+        logger.exception("ask_race_data LLM run failed: %s", exc)
+        return AskResponse(**_error_answer(req.question, exc))
 
 
 # ---- Optional A2A showcase door (not the CX wire) ----------------------------
