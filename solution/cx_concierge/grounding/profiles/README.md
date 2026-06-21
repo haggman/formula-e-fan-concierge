@@ -14,8 +14,9 @@ profiles/
 ```
 
 To populate: run `build_profiles.ipynb`, then download its
-`gs://<PROJECT>-fe-grounding/profiles/drivers|teams/*.md` output into here so the docs
-are version-controlled alongside the rules pack. The canonical `driver_profiles.parquet`
-/ `team_profiles.parquet` stay in the bucket (and/or BigQuery) as the data artifacts.
+`gs://class-demo/formula-e/grounding/profiles/drivers|teams/*.md` output into here so the
+docs are version-controlled alongside the rules pack. The canonical `driver_profiles.parquet`
+/ `team_profiles.parquet` live at `gs://class-demo/formula-e/grounding/profiles/` (and/or
+BigQuery) as the data artifacts students consume.
 
 Source data is never modified — these are new artifacts.

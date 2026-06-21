@@ -15,17 +15,23 @@ version-controlled; a Vertex AI Search data store is then pointed at it (next st
   team profiles. It reads the FE entry list + career stats from `gs://class-demo/...`
   **read-only**, uses Vertex AI Gemini to write several-paragraph profiles **grounded in
   the structured stats** (so car numbers, short codes, teams, and career figures match the
-  dataset and nothing is invented), and writes **new** artifacts to a bucket we own:
-  `driver_profiles.parquet`, `team_profiles.parquet`, and per-profile `.md` docs. The FE
-  source data is never modified.
+  dataset and nothing is invented), and writes **new** artifacts back to the shared
+  `class-demo` bucket under a new `formula-e/grounding/` prefix — `driver_profiles.parquet`,
+  `team_profiles.parquet`, and per-profile `.md` docs — so students receive ready-made
+  profiles alongside the rest of the staged data. **Additive only:** the FE source files
+  are never modified.
 - **`profiles/`** — where the generated per-profile `.md` docs are committed (download the
   notebook's `gs://…/profiles/drivers|teams/*.md` output into here). RAG-ready.
 
 ## Pipeline
 
-1. Author rules (`rules/`) — done.
-2. Run `build_profiles.ipynb` in Colab Enterprise → new parquet + `.md` profiles in our
-   bucket; commit the `.md` into `profiles/`.
+1. Author rules (`rules/`) — done. Upload them to the staging corpus too:
+   `gcloud storage cp rules/*.md gs://class-demo/formula-e/grounding/rules/`.
+2. Run `build_profiles.ipynb` in Colab Enterprise → new parquet + `.md` profiles written
+   to `gs://class-demo/formula-e/grounding/profiles/` (students consume these); also commit
+   the `.md` into `profiles/` for version control. The notebook's final cell **updates the
+   dataset catalog** (`reference/data_manifest.json` + `data_dictionary.md`) idempotently,
+   backing both up to `reference/_backups/<ts>/` first, so the new assets are discoverable.
 3. **Index for CX:** point a **Vertex AI Search** data store at the `rules/` + `profiles/`
    docs (unstructured); optionally load the parquet into BigQuery for structured use.
 4. The CX concierge attaches the data store via a **Data store / File search tool**, with
