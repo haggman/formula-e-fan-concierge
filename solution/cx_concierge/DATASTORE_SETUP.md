@@ -1,90 +1,112 @@
-# Grounding the CX concierge — Vertex AI Search data store (student UI guide)
+# Grounding the CX concierge — data stores (student UI guide)
 
-How to give the concierge its **knowledge base**: create a Vertex AI Search data
-store over the staged grounding corpus (FE rules + driver/team profiles), then
-attach it to the CX agent as a **Data store tool**. This is a **console / UI**
-task — no code. It pairs with `race_data_subagent/CX_SETUP.md` (the OpenAPI tool
-for live + stats) and Google Search (the long tail).
+Give the concierge its **knowledge base**: two Vertex AI Search data stores over
+the staged grounding corpus — **FE Rules** and **Driver & Team Profiles** — then
+attach them to the CX concierge as a **Data store tool**. This is a **console /
+UI** task (no code), and it follows the same pattern as the MLB "front-office"
+build: separate stores for separate knowledge surfaces.
 
-> Console naming note: Vertex AI Search now lives under **AI Applications** (and
-> is being rebranded "Agent Search"); CX is **Conversational Agents / CX Agent
-> Studio**. Menus may shift slightly — the flow below is current as of 2026-06.
+It pairs with `race_data_subagent/CX_SETUP.md` (the OpenAPI tool for live race +
+stats) and Google Search (the long tail). Together: bios/rules from the data
+stores, live/time-honest stats from the subagent, everything else from Search.
 
-## Prerequisites (instructor has already done these)
+> Console naming: Vertex AI Search data stores live on the **AI Applications**
+> page (part of the Gemini Enterprise platform); CX is **Conversational Agents /
+> CX Agent Studio**. The flow is current as of 2026-06; menus may shift slightly.
 
-- The grounding corpus is staged in GCS as **plain text** (Vertex AI Search
-  ingests TXT/PDF/HTML/DOCX — **not** `.md`):
-  - `gs://class-demo/formula-e/grounding/profiles/drivers/*.txt`
-  - `gs://class-demo/formula-e/grounding/profiles/teams/*.txt`
-  - `gs://class-demo/formula-e/grounding/rules/*.txt`
-- APIs enabled: **AI Applications / Discovery Engine** (`discoveryengine.googleapis.com`)
-  and **Dialogflow / Conversational Agents**.
+## Prerequisites (instructor has staged these)
 
-## Part 1 — Create the data store (AI Applications console)
+The grounding corpus is in GCS as **plain text** (Vertex AI Search ingests
+TXT/PDF/HTML/DOCX — **not** `.md`), split into two folders:
 
-1. In the Cloud console go to **AI Applications** → **Data Stores** → **Create data store**.
-2. **Source:** choose **Cloud Storage**.
-3. **What to import:** select **Folder**, and enter
-   `gs://class-demo/formula-e/grounding/` (it recurses into `rules/` and
-   `profiles/`; non-text files like the `.parquet`/`.jsonl`/`.md` are skipped).
-4. **Type of data:** **Unstructured documents**. (Optional but recommended for
-   RAG: enable **document chunking** in the parsing/processing options.)
-5. **Location:** `global` (matches the rest of the lab).
-6. Give the data store a name, e.g. `fe-knowledge`, and **Create**. Ingestion runs
-   in the background — wait until the documents show as imported (a few minutes).
+- `class-demo/formula-e/grounding/rules/` — the FE rules pack (`*.txt`)
+- `class-demo/formula-e/grounding/profiles/` — driver + team profiles
+  (`drivers/*.txt`, `teams/*.txt`; the `.parquet`/`.jsonl` siblings are ignored
+  by document ingestion)
 
-> Heads-up: importing from GCS does **not** carry over Cloud Storage IAM — anyone
-> with data-store access can read the indexed content. Fine here (public 2024 race
+APIs enabled: **Discovery Engine / AI Applications** and **Conversational Agents**.
+
+## Why two data stores (not one)
+
+Each data store is its own retrieval (RAG) index. Keeping **rules** separate from
+**profiles** keeps each retrieval surface clean — a rules question retrieves from
+the rules index, a "who is this driver" question from the profiles index — and
+you can still query both together from one tool. Mixing them muddies relevance.
+(Same reasoning as the MLB rulebook-vs-profiles split.)
+
+## Part 1 — Create the two data stores
+
+You can create them on the **AI Applications** page (**Data Stores → + Create
+data store**) or inline from CX later (**+ Tool → Data store → create new**).
+Either way the steps are the same; do it once per store.
+
+**Store A — FE Rules**
+
+1. Source: **Cloud Storage**.
+2. Data type: **Unstructured Data Import (Document Search & RAG)** → **Documents**.
+3. Synchronization frequency: **One time** (the rules pack is a versioned doc, not a live feed).
+4. Select **Folder**, enter: `class-demo/formula-e/grounding/rules`
+5. Name: `FE Rules`.
+6. **Document processing / parser:** the default **digital parser** is correct — these
+   are plain-text files, so the Layout Parser (needed for structured PDFs like the
+   MLB rulebook) adds cost for no benefit here. Leave **chunking** on for RAG.
+7. **Create.** Ingestion runs in the background (fast — a handful of small docs).
+
+**Store B — Driver & Team Profiles**
+
+8. **+ New data store** again → **Cloud Storage** → **Unstructured / Documents** → **One time**.
+9. Folder: `class-demo/formula-e/grounding/profiles` (recurses into `drivers/` + `teams/`).
+10. Name: `Driver and Team Profiles`. Default digital parser, chunking on. **Create.**
+
+> Note: importing from GCS does **not** carry Cloud Storage IAM — anyone with
+> data-store access can read the indexed content. Fine here (public 2024 race
 > bios/rules), but worth knowing.
 
-## Part 2 — Add the Data store tool in CX
+## Part 2 — Attach to the CX concierge
 
-1. Open **Conversational Agents / CX Agent Studio** (`ces.cloud.google.com`),
-   select your project and the concierge agent.
-2. **Tools** → **+ Create**. **Type:** **Data store**. Name it `fe_knowledge`.
-3. **Select the data store** you created (`fe-knowledge`). (CX can also create a
-   Cloud Storage data store inline here, but you've already made one.)
+1. Open **Conversational Agents / CX Agent Studio** (`ces.cloud.google.com`), select
+   your project and the concierge agent.
+2. **Tools → + Create.** Type: **Data store**. Name it `fe_knowledge`.
+3. Add **both** data stores to the tool (`FE Rules` and `Driver and Team Profiles`).
+   (One tool can query multiple stores; or make two tools if you want explicit
+   routing.)
 4. **Grounding settings:** set the **minimum grounding confidence** (VERY_LOW →
-   VERY_HIGH) — start at **LOW/MEDIUM** and raise it if you see weak answers; the
-   agent withholds responses below the threshold. Leave the **grounding
-   heuristics** filter on to suppress likely-hallucinated answers.
+   VERY_HIGH) — start at **LOW/MEDIUM**, raise it if answers look weak; responses
+   below the threshold are withheld. Keep the **grounding heuristics** filter on.
 5. Save.
 
-## Part 3 — Tell the agent when to use it (grounding instruction)
+## Part 3 — Tell the agent when to use it
 
-On the agent's instructions/playbook, route knowledge questions to the data store
-and keep answers grounded:
+In the agent's instructions/playbook:
 
 > For questions about a driver's or team's background, history, or who they are,
 > and for Formula E rules (Attack Mode, energy, race format, the circuit, the car,
 > tyres, flags), answer **only** from the `fe_knowledge` data store. For anything
-> about the live race or statistics ("how's car 13 now?", standings, lap times,
-> career numbers during the race), use the `ask_race_data` tool. Never state facts
-> from your own knowledge, and never reveal anything the race tool declines to
-> answer.
+> about the live race or in-race statistics ("how's car 13 now?", standings, lap
+> times, career numbers during the race), use the `ask_race_data` tool. Never
+> state race facts from your own knowledge, and never reveal anything the race
+> tool declines to answer.
 
-This keeps the **two grounded sources** separated: the data store for static
-bio/rules knowledge, the race-data subagent for live + time-honest stats.
+This keeps the grounded sources separated: data store for static bio/rules
+knowledge, the race-data subagent for live + time-honest stats.
 
 ## Part 4 — Test in the Simulator
 
 - "**Who is António Félix da Costa?**" / "**Tell me about the Porsche team**" →
-  grounded bio from the data store (cite shows a `profiles/...txt` doc).
-- "**What is Attack Mode?**" / "**How does energy work in Formula E?**" → grounded
-  from `rules/...txt`.
-- "**Who's da Costa's teammate?**" → answered from the profile (teammate field).
-- Confirm the **citations** point at your data-store documents — that's proof the
+  grounded bio; the citation should point at a `profiles/...txt` doc.
+- "**What is Attack Mode?**" / "**How does energy work?**" → grounded from `rules/...txt`.
+- "**Who is da Costa's teammate?**" → from the profile's teammate line.
+- Confirm the **citations** reference your data-store documents — that's proof the
   answer is grounded, not invented.
 
 ## Troubleshooting
 
-- **Data store imported 0 documents** → the source had no supported file types.
-  Confirm `.txt` files exist under the folder (Vertex AI Search does not ingest
-  `.md`). Re-run the instructor staging step.
-- **Answers seem ungrounded / invented** → tighten the agent instruction
-  ("answer only from the data store") and/or raise the grounding confidence level.
-- **Tool returns nothing** → check the data store finished importing and the tool
-  points at the right data store; check the agent has permission to the data store.
+- **0 documents imported** → the folder had no supported types. Confirm `.txt`
+  files exist (Vertex AI Search does not ingest `.md`).
+- **Answers look invented** → tighten the instruction ("answer only from the data
+  store") and/or raise the grounding confidence level.
+- **Citations missing / wrong store** → confirm both stores finished importing and
+  the tool references them.
 
 ## Sources
 

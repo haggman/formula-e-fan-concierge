@@ -33,9 +33,10 @@ version-controlled; a Vertex AI Search data store is then pointed at it (next st
    commit the `.md` into `profiles/` for version control. The notebook's final cell **updates the
    dataset catalog** (`reference/data_manifest.json` + `data_dictionary.md`) idempotently,
    backing both up to `reference/_backups/<ts>/` first.
-3. **Index for CX (students, in the UI):** create a **Vertex AI Search** data store over
-   `gs://class-demo/formula-e/grounding/` and attach it to the concierge as a **Data store
-   tool** — full walkthrough in `../DATASTORE_SETUP.md`. (Instructor stages the corpus;
-   students do the data store + wiring as the grounding lesson.)
+3. **Index for CX (students, in the UI):** create **two** Vertex AI Search data stores —
+   **FE Rules** (over `grounding/rules/`) and **Driver & Team Profiles** (over
+   `grounding/profiles/`) — and attach both to the concierge as a **Data store tool**. Full
+   walkthrough in `../DATASTORE_SETUP.md`. (Instructor stages the `.txt` corpus; students do
+   the data stores + wiring as the grounding lesson — same pattern as the MLB build.)
 4. The concierge combines the data store (bios/rules) + the race-data subagent (live/stats)
    + **Google Search** (long tail), grounded so it answers only from those sources.
