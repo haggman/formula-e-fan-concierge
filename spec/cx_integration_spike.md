@@ -72,6 +72,17 @@ The spike artifacts live in `spike/cx_openapi_spike/` (stub agent `agent.py`/`no
 5. Configure **async** if/when tool latency consistently exceeds ~5s.
 6. **(Optional showcase)** also deploy to Agent Engine (auto-registers in Agent Registry) and/or expose A2A via `to_a2a`.
 
+### Real build status (#3 `race_data_subagent` — built 2026-06-20)
+
+The recipe above is now implemented in `solution/race_data_subagent/` (with a matching `starter/` scaffold). What we settled/learned turning the stub into the real subagent:
+
+- **Serving layer.** `app.py` serves the single `POST /ask_race_data` in both modes: in **LLM mode it IS `get_fast_api_app()`** (the spec wording, the canonical ADK-on-Cloud-Run surface + auto `/openapi.json`); in **`DETERMINISTIC=1` first-light it's a plain FastAPI app** answering with no google-adk/Vertex/Toolbox, so the wire + future-refusal prove out on a fresh project before any creds. The CX-facing `/ask_race_data` runs through the spike's validated invocation (own Runner, **unique per-request session id**) in both. Flipping to plain-FastAPI-only is deleting one `else` branch.
+- **Package layout.** The package uses **relative** internal imports so it loads both as `solution.race_data_subagent` (repo) and as a top-level `race_data_subagent` agent folder under an ADK `agents_dir` (container: `/app/agents/race_data_subagent`, `app.py` at `/app`, `shared/` at `/app/shared`). `shared.*` stays absolute.
+- **Build/deploy.** The Dockerfile's context must be the **repo root** (it needs `shared/`), so `gcloud run deploy --source` won't do — `deploy/deploy_race_data_subagent.sh` builds via Cloud Build (`cloudbuild.yaml`, `PKG_DIR` selects starter/solution), deploys private, grants `run.invoker` to the CES service agent + the runtime SA's `datastore.user`/`aiplatform.user`. Runbook: `deploy/RUNBOOK_race_data_subagent.md` (data layer via `setup/all.sh` first).
+- **Stale `mcp_server.py` superseded/removed** (OpenAPI chosen over MCP); recorded with the other gotchas in `solution/race_data_subagent/KNOWN_FIXES.md`.
+- **`requirements.txt`** adds `toolbox-core` (backs `ToolboxToolset`) to the spike's set; model default is `gemini-3.5-flash` (env `FE_MODEL`).
+- **Verified locally** (`scripts/verify_subagent_local.py`, DETERMINISTIC canned mode): live-moment answer with `refused_future=false` and the bridged `race_wall_time_ns`, "who wins?"/podium/final-results refused with `refused_future=true`. Live end-to-end (deployed service, real Firestore + BigQuery + LLM, CX simulator) runs from the runbook on Patrick's project.
+
 ### CX Agent Studio gotchas (for the student guide)
 
 - CX Agent Studio is **not** found by searching the Cloud Console — go to **`ces.cloud.google.com`**, pick the project, "Create your first AI agent" (first creation takes a few minutes), then the designer opens.

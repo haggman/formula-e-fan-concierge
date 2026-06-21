@@ -1,0 +1,15 @@
+# Cloud Run service deps for the race-data subagent (the agent IS the service).
+
+# Web service / OpenAPI surface
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.7.0
+
+# Live "now" plane (Firestore reader in shared/)
+google-cloud-firestore>=2.16.0
+
+# ADK agent (LLM mode) + ToolboxToolset (BigQuery via fe-toolbox) + A2A door.
+# [a2a] pulls the A2A extras for to_a2a(); toolbox-core backs ToolboxToolset.
+google-adk[a2a]>=1.29.0
+toolbox-core>=0.1.0
+google-cloud-aiplatform>=1.144.0

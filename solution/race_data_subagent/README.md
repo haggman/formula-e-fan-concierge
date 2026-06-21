@@ -59,12 +59,61 @@ CX Agent Studio  ──OpenAPI tool (POST /ask_race_data, Service Agent ID Token
 - **Optional showcase:** also deploy to Agent Engine (auto-registers in Agent Registry) and/or
   expose an A2A door (`to_a2a(root_agent)`, ~1 line). Off the critical path.
 
+## Serving layer (the "which app.py" decision)
+
+`app.py` runs in two modes, chosen by the `DETERMINISTIC` env var:
+
+- **`DETERMINISTIC=0` (the real subagent):** the app **is** ADK's
+  `get_fast_api_app()` — the canonical "ADK agent on Cloud Run" surface (auto
+  `/openapi.json`, the `/run*` + session endpoints). `POST /ask_race_data` runs
+  the real `LlmAgent` (Firestore "now" + BigQuery "then") via a Runner. This is
+  the spec wording, literally.
+- **`DETERMINISTIC=1` (first-light, default):** the app is a plain FastAPI
+  instance and `POST /ask_race_data` answers deterministically (read "now",
+  refuse the future, echo the bridged wall time) — **no google-adk, no Vertex,
+  no Toolbox needed.** It proves the CX → OpenAPI wire and the future-refusal on
+  a fresh project before any creds, and it's what the local harness exercises.
+
+Either way the single CX-facing operation is `POST /ask_race_data {question} ->
+{answer, race_time_s, race_wall_time_ns, now_source, refused_future, mode}`, and
+the agent IS the service (no wrapper). The validated spike used a plain FastAPI +
+Runner throughout; this build keeps that proven invocation for `/ask_race_data`
+(unique per-request session id) and adds `get_fast_api_app()` as the LLM-mode
+shell to match the spec. To go plain-FastAPI-only, drop the `else` branch in
+`app.py`.
+
+**Package layout for `get_fast_api_app()`:** the package uses **relative**
+internal imports so it loads both as `solution.race_data_subagent` (in the repo)
+and as a top-level `race_data_subagent` agent folder under an ADK `agents_dir`
+(in the container). `shared.*` stays absolute; the Dockerfile copies `shared/`
+alongside. See `KNOWN_FIXES.md`.
+
+## Run / deploy / verify
+
+```bash
+# Local first-light (no cloud): proves the wire + future refusal
+pip install fastapi pydantic httpx
+python scripts/verify_subagent_local.py
+
+# Deploy to Cloud Run (data layer up first: bash setup/all.sh)
+DETERMINISTIC=1 bash deploy/deploy_race_data_subagent.sh   # wire first
+DETERMINISTIC=0 bash deploy/deploy_race_data_subagent.sh   # then the real agent
+```
+
+Full deploy + live-verification steps (live-moment answer + refused "who wins?")
+are in `deploy/RUNBOOK_race_data_subagent.md`; CX UI wiring in
+`spike/cx_openapi_spike/CX_WIRING.md`.
+
 ## Files
 
-- `agent.py` — ADK agent: ToolboxToolset (BQ) + now_tools (Firestore) + time-honest prompt.
+- `agent.py` — ADK agent: ToolboxToolset (the 14 Ch2 BQ tools) + now_tools (Firestore) + time-honest prompt.
 - `config.py` — race scope + the time bridge (must match the commentator's constant).
 - `prompts.py` — time-honesty doctrine + how to choose "now" vs "then" tools.
-- `tools/now_tools.py` — field-wide Firestore "now" lookups (any car, not just #13).
-- `app.py` — FastAPI service: `get_fast_api_app()` + `POST /ask_race_data` (the CX OpenAPI op).
-- `Dockerfile` — container for the Cloud Run service (the agent is the service).
+- `tools/now_tools.py` — field-wide Firestore "now" lookups (any car) + `read_now`/`is_future_question` for the deterministic path.
+- `app.py` — the Cloud Run service: `get_fast_api_app()` (LLM) / plain FastAPI (deterministic) + the single `POST /ask_race_data`.
+- `openapi_ask_race_data.yaml` — the trimmed single-operation schema to paste into the CX OpenAPI tool.
+- `requirements.txt` — service deps (FastAPI, firestore, `google-adk[a2a]`, `toolbox-core`, aiplatform).
+- `Dockerfile` + `cloudbuild.yaml` — repo-root-context build (needs `shared/`); `PKG_DIR` selects starter/solution.
+- `KNOWN_FIXES.md` — gotchas (superseded `mcp_server.py`, per-request session id, PROJECT_ID 404, layout, …).
+- Deploy: `deploy/deploy_race_data_subagent.sh`; verify: `scripts/verify_subagent_local.py` + `deploy/RUNBOOK_race_data_subagent.md`.
 - See `spike/cx_openapi_spike/` for the validated reference implementation of this wire.

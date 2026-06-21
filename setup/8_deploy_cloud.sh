@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
-# OPTIONAL instructor step — push the brain and the UI into GCP.  (~15-20 min)
+# Step 8 (LATER LAB) — push the brain and the UI into GCP.  (~15-20 min)
 # WHERE: Cloud Shell, repo root, after `source activate.sh`, AFTER setup/all.sh
-# WHAT:  bash setup/7_deploy_cloud.sh
+# WHAT:  bash setup/8_deploy_cloud.sh
+#
+# NOTE: this is the surface/commentator lab's deploy — NOT this lab. It is still
+# Ch2-vendored (Agent Engine + the race_engineer/pit-wall frontend) and gets
+# re-pointed to the commentator when that build lands. This lab's deploy is
+# setup/7_deploy_subagent.sh.
 #
 # Deploys:
 #   1. The agent to Vertex AI Agent Engine (Agent Runtime). The create step

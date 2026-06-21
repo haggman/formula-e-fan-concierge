@@ -86,8 +86,10 @@ A–F sequence of Ch2 (open #8 resolved: parallel by package, each with its own 
 The skeleton vendors Ch2 infra **as-is**; these still reference the old `solution.race_engineer`
 package via the `AGENT_PACKAGE` seam and get re-pointed to `commentator` during the build:
 `frontend/engineer_loop.py` (→ `commentator_loop.py`), `frontend/agent_client.py`,
-`shared/agent_pkg.py` (the seam default), `activate.sh`, `setup/7_deploy_cloud.sh`,
-`deploy/build_engine_app.py`, `deploy/deploy_frontend.sh`, and `scripts/*` (local_test,
+`shared/agent_pkg.py` (the seam default), `activate.sh`, `setup/8_deploy_cloud.sh`
+(was `7_deploy_cloud.sh`; renumbered — `setup/7_deploy_subagent.sh` is now this lab's
+race-data-subagent deploy), `deploy/build_engine_app.py`, `deploy/deploy_frontend.sh`,
+and `scripts/*` (local_test,
 agent_chat, stage_probe, test_frame_tools). `shared/scorer.py` keeps Ch2's car-13 weights until
 the re-aim lands (`spec/frame_tools_scorer_reaim.md`). All intentional: this session locks the
 architecture and lays out the repo; code adaptation is spec'd, not implemented.

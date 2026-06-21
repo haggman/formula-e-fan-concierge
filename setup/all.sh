@@ -7,8 +7,9 @@
 # index builds are the one variable). Idempotent: safe to rerun after a
 # failure — completed steps fast-forward.
 #
-# What this does NOT do: deploy Agent Engine or the Cloud Run frontend.
-# Those are the optional instructor extras: bash setup/7_deploy_cloud.sh
+# What this does NOT do: deploy any agent. This lab's agent (the race-data
+# subagent) deploys with setup/7_deploy_subagent.sh. The Agent-Engine + frontend
+# "push to cloud" extras are a later lab: setup/8_deploy_cloud.sh.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source setup/_lib.sh

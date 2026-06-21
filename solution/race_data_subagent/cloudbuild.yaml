@@ -1,0 +1,25 @@
+# Cloud Build config for the race-data subagent image.
+# WHY: the Dockerfile's build context must be the REPO ROOT (it needs shared/
+# alongside the package), so we can't use `gcloud run deploy --source` (that
+# wants a Dockerfile at the source root). This builds with the package Dockerfile
+# against the repo-root context, then pushes.
+#
+# Invoked by deploy/deploy_race_data_subagent.sh from the repo root:
+#   gcloud builds submit . \
+#     --config solution/race_data_subagent/cloudbuild.yaml \
+#     --substitutions _IMAGE=<image>,_PKG_DIR=<solution|starter>/race_data_subagent
+substitutions:
+  _PKG_DIR: solution/race_data_subagent
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - solution/race_data_subagent/Dockerfile
+      - --build-arg
+      - PKG_DIR=${_PKG_DIR}
+      - -t
+      - ${_IMAGE}
+      - .
+images:
+  - ${_IMAGE}
