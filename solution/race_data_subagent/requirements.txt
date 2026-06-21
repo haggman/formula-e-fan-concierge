@@ -9,7 +9,9 @@ pydantic>=2.7.0
 google-cloud-firestore>=2.16.0
 
 # ADK agent (LLM mode) + ToolboxToolset (BigQuery via fe-toolbox) + A2A door.
-# [a2a] pulls the A2A extras for to_a2a(); toolbox-core backs ToolboxToolset.
-google-adk[a2a]>=1.29.0
+# IMPORTANT: ToolboxToolset requires the [toolbox] extra (pulls toolbox-adk) —
+# [a2a] alone is NOT enough (you'll get "ToolboxToolset requires 'toolbox-adk'").
+# [a2a] pulls the A2A extras for to_a2a(); toolbox-core is the underlying client.
+google-adk[a2a,toolbox]>=1.29.0
 toolbox-core>=0.1.0
 google-cloud-aiplatform>=1.144.0

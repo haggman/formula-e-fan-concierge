@@ -70,7 +70,27 @@ the source root) won't do. The deploy script builds via Cloud Build using
 `cloudbuild.yaml` (`docker build -f solution/race_data_subagent/Dockerfile .`)
 then deploys the resulting image.
 
-## 8. Two modes, and why deterministic exists
+## 8. ToolboxToolset needs the `[toolbox]` extra (toolbox-adk)
+
+`google-adk[a2a]` alone is NOT enough — importing `agent.py` then fails at
+container start with: *"ToolboxToolset requires the 'toolbox-adk' package.
+Please install it using `pip install google-adk[toolbox]`."* Fixed by
+`google-adk[a2a,toolbox]>=1.29.0` in `requirements.txt`.
+
+## 9. Deterministic container must NOT import the agent (TOOLBOX_URL is set)
+
+The deploy script sets `TOOLBOX_URL` even for the `DETERMINISTIC=1` first-light
+deploy (so flipping to LLM mode is just a redeploy). The old `__init__.py` guard
+(`adk installed AND TOOLBOX_URL`) therefore fired in deterministic mode too:
+importing `now_tools` runs the package `__init__`, which imported `agent.py`,
+which builds a `ToolboxToolset` at import → the crash in #8, in a mode that
+doesn't even use the agent. Fix: the guard also requires `DETERMINISTIC != "1"`,
+so the deterministic container never touches the LLM agent / ToolboxToolset. (The
+local harness didn't catch this because the sandbox has no `google-adk`
+installed, so the guard's `find_spec` short-circuited — worth deploying once, or
+installing google-adk locally, to exercise the real import path.)
+
+## 10. Two modes, and why deterministic exists
 
 `DETERMINISTIC=1` (default) answers without the LLM/Vertex/Toolbox — it proves
 the CX → OpenAPI wire and the future-refusal end to end on a fresh project before
