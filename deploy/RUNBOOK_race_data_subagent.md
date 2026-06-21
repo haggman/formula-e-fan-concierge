@@ -65,9 +65,20 @@ curl -s -X POST http://localhost:8080/ask_race_data -H 'Content-Type: applicatio
 curl -s -X POST http://localhost:8080/ask_race_data -H 'Content-Type: application/json' \
   -d '{"question":"who wins the race?"}' | python3 -m json.tool
 
-# 3c. the OpenAPI schema FastAPI serves (sanity)
-curl -s http://localhost:8080/openapi.json | python3 -m json.tool | head -40
+# 3c. confirm /ask_race_data is in the served schema (sanity)
+curl -s http://localhost:8080/openapi.json \
+  | python3 -c "import sys,json;print([p for p in json.load(sys.stdin)['paths']])"
 ```
+
+> **The `/openapi.json` looks different between modes — both are fine.** In
+> `DETERMINISTIC=1` the app is a plain FastAPI titled "Race-Data Subagent" with
+> just `/healthz` + `/ask_race_data`. In `DETERMINISTIC=0` the app **is** ADK's
+> `get_fast_api_app()`, so its auto schema is titled "FastAPI" and also lists
+> ADK's own ops (`/health`, `/version`, `/run`, `/list-apps`, …) alongside
+> `/ask_race_data`. This does NOT affect CX: CX requires **one operation per
+> tool**, so you paste the hand-trimmed `openapi_ask_race_data.yaml` — never
+> point CX at this multi-operation `/openapi.json`. Step 3c just confirms
+> `/ask_race_data` is present.
 
 **Pass criteria:** 3a → `"refused_future": false` with `race_wall_time_ns` =
 `1715519045726000000 + race_time_s*1e9`; 3b → `"refused_future": true` and no
@@ -92,9 +103,10 @@ If 3a/3b 403 in LLM mode, the runtime SA is missing a role — rerun the deploy
 
 In CX Agent Studio (`ces.cloud.google.com`), add an **OpenAPI** tool: paste
 `solution/race_data_subagent/openapi_ask_race_data.yaml` with `SERVICE_URL`
-replaced by your `SERVICE_URL`, auth = **Service agent ID token**. Full UI steps
-(and the `{@TOOL: ...}` instruction reference) are in
-`spike/cx_openapi_spike/CX_WIRING.md`. Simulator checks: "How's car 13 right
+replaced by your `SERVICE_URL`, auth = **Service agent ID token**. Full
+step-by-step UI guide (tool creation, the grounding instruction, the `{@TOOL:
+...}` reference, async, troubleshooting) is in
+**`solution/race_data_subagent/CX_SETUP.md`**. Simulator checks: "How's car 13 right
 now?" answers; "Who wins?" refuses.
 
 ## Notes
