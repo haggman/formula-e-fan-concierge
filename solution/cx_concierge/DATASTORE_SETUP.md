@@ -50,11 +50,12 @@ Either way the steps are the same; do it once per store.
 3. Synchronization frequency: **One time** (the rules pack is a versioned doc, not a live feed).
 4. Select **Folder**, enter: `class-demo/formula-e/grounding/rules`
 5. Name: `FE Rules`.
-6. **Document processing / parser:** this folder holds the **FIA regulation PDFs**, so set the
-   **Layout Parser** (same choice as the MLB rulebook) — it preserves the section/clause
-   hierarchy that makes retrieval relevant on a structured regs document. The concise `.txt`
-   pack in the same folder parses fine under it too. Leave **chunking** on for RAG.
-   (Layout parsing adds a Document AI charge at ingestion only.)
+6. **Document processing options:** this folder holds the **FIA regulation PDFs**, so set the
+   parser to **Layout Parser** (same choice as the MLB rulebook) — it preserves the
+   section/clause hierarchy that makes retrieval relevant on a structured regs document. Then
+   turn on its advanced settings (may as well exercise them all): **table annotations**,
+   **image annotations**, and **Gemini enhancement**, plus **"Include ancestor headings in
+   chunks."** If it asks about a pricing model, keep the default (**general pricing**).
 7. **Create.** Ingestion runs in the background.
 
 **Store B — Driver & Team Profiles**
@@ -62,12 +63,16 @@ Either way the steps are the same; do it once per store.
 8. **+ New data store** again → **Cloud Storage** → **Unstructured / Documents** → **One time**.
 9. Folder: `class-demo/formula-e/grounding/profiles` (recurses into `drivers/` + `teams/`).
 10. Name: `Driver and Team Profiles`. These are plain `.txt`, so the **default digital parser**
-    is right here (no Layout Parser needed). Chunking on. **Create.** (This is the larger
-    ingest — every FE driver + team — so it takes a bit longer.)
+    is right here (no Layout Parser needed). If it asks about a pricing model, keep the default
+    (**general pricing**). **Create.** (This is the larger ingest — every FE driver + team — so
+    it takes a bit longer.)
 
-> Note: importing from GCS does **not** carry Cloud Storage IAM — anyone with
-> data-store access can read the indexed content. Fine here (public 2024 race
-> bios/rules), but worth knowing.
+> **Don't wait on indexing — overlap it.** A new data store typically takes **~10–15 minutes**
+> to finish importing before it's truly queryable. Kick off **both** stores first, then move
+> straight on to building the agent (Part 2 onward) while they index in the background; they'll
+> be ready by the time you test. (Lab sequencing: have attendees create the data stores as the
+> very first action, so the indexing wait is hidden behind the agent build rather than being
+> dead time.)
 
 ## Part 2 — Attach to the CX concierge
 

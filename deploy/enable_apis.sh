@@ -7,9 +7,11 @@ PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null)}"
 echo "Enabling APIs on project: ${PROJECT_ID}"
 
 # --- Core stack (strict: any failure here IS fatal — nothing works without
-# these). The second line is the Agent Engine documented set (Vertex AI,
+# these). The second group is the Agent Engine documented set (Vertex AI,
 # Storage, Logging, Monitoring, Trace, Telemetry, Resource Manager) plus
-# Compute, which the console expects on.
+# Compute, which the console expects on. The last two are the CX concierge
+# (Challenge 1) path: Vertex AI Search data stores (discoveryengine) and
+# Conversational Agents / CX Agent Studio (dialogflow).
 gcloud services enable \
     run.googleapis.com \
     pubsub.googleapis.com \
@@ -27,6 +29,8 @@ gcloud services enable \
     telemetry.googleapis.com \
     cloudresourcemanager.googleapis.com \
     compute.googleapis.com \
+    discoveryengine.googleapis.com \
+    dialogflow.googleapis.com \
     --project "${PROJECT_ID}"
 
 # --- Agent Engine console extras (tolerant: enabled one-by-one, WARN on
@@ -53,6 +57,7 @@ CONSOLE_EXTRAS=(
     observability.googleapis.com      # Observability API
     saasservicemgmt.googleapis.com    # App Lifecycle Manager API
     securitycenter.googleapis.com     # Security Command Center API
+    ces.googleapis.com                # Customer Engagement Suite (CX Agent Studio; gcp-sa-ces service agent)
 )
 echo ""
 echo "Enabling Agent Engine console extras (failures here are WARNs, not fatal):"
@@ -67,5 +72,5 @@ done
 echo ""
 echo "Done. Current AI/speech/data services:"
 gcloud services list --enabled --project "${PROJECT_ID}" \
-    --filter="config.name:(aiplatform OR texttospeech OR speech OR bigquery OR firestore OR pubsub OR run)" \
+    --filter="config.name:(aiplatform OR texttospeech OR speech OR bigquery OR firestore OR pubsub OR run OR discoveryengine OR dialogflow)" \
     --format="value(config.name)"

@@ -14,7 +14,7 @@ this is the real build of that wire.
 ```bash
 gcloud config set project YOUR_PROJECT_ID
 export REGION=us-central1
-source activate.sh                      # venv + PROJECT_ID/REGION + TOOLBOX_URL discovery
+source activate.sh                      # venv + PROJECT_ID/REGION + TOOLBOX_URL + SUBAGENT_URL discovery
 ```
 
 ## 1. Stand up the data layer first (the subagent talks to it)
@@ -41,12 +41,16 @@ grants `run.invoker` to the CES service agent and the runtime SA's Firestore +
 Vertex roles, so flipping to the real agent later is just a redeploy.
 
 ```bash
-DETERMINISTIC=1 bash deploy/deploy_race_data_subagent.sh
+DETERMINISTIC=1 bash setup/7_deploy_subagent.sh   # numbered wrapper for deploy/deploy_race_data_subagent.sh
 # note the printed SERVICE_URL
 ```
 
 Deploy the **student** build instead of the reference with
 `SUBAGENT_PACKAGE=starter.race_data_subagent`.
+
+> Going straight to a CX-ready deploy? You can **skip to step 4** and deploy
+> `DETERMINISTIC=0` directly — this first-light phase just proves the wire with no
+> LLM/creds. Either way the deploy grants the IAM CX needs.
 
 ## 3. Prove the wire with curl (authenticated; the service is private)
 
@@ -117,7 +121,9 @@ nothing — fine for the spoiler test.)
 ## 4. Flip to the real agent (Firestore "now" + BigQuery "then", LLM)
 
 ```bash
-DETERMINISTIC=0 bash deploy/deploy_race_data_subagent.sh
+DETERMINISTIC=0 bash setup/7_deploy_subagent.sh
+source activate.sh                      # re-source so $SUBAGENT_URL is set for the CX step
+echo "SUBAGENT_URL=$SUBAGENT_URL"
 ```
 
 Re-run the curls: `mode` becomes `llm`, `now_source` becomes `firestore`, and the
@@ -132,8 +138,9 @@ If 3a/3b 403 in LLM mode, the runtime SA is missing a role — rerun the deploy
 ## 5. Wire CX
 
 In CX Agent Studio (`ces.cloud.google.com`), add an **OpenAPI** tool: paste
-`solution/race_data_subagent/openapi_ask_race_data.yaml` with `SERVICE_URL`
-replaced by your `SERVICE_URL`, auth = **Service agent ID token**. Full
+`solution/race_data_subagent/openapi_ask_race_data.yaml` with the schema's
+`SERVICE_URL` replaced by your **`$SUBAGENT_URL`** (`echo "$SUBAGENT_URL"` after
+re-activating), auth = **Service agent ID token**. Full
 step-by-step UI guide (tool creation, the grounding instruction, the `{@TOOL:
 ...}` reference, async, troubleshooting) is in
 **`solution/race_data_subagent/CX_SETUP.md`**. Simulator checks: "How's car 13 right
