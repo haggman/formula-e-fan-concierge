@@ -17,14 +17,21 @@ appendix below).
 
 ## 0. Get your values
 
+After the subagent is deployed, `source activate.sh` exports **`$SUBAGENT_URL`** (the base
+Cloud Run URL) automatically — same discovery it does for `TOOLBOX_URL`:
+
 ```bash
-export REGION=us-central1
-export SERVICE_URL="$(gcloud run services describe race-data-subagent \
-  --region "$REGION" --format='value(status.url)')"
-echo "$SERVICE_URL"     # e.g. https://race-data-subagent-abc123-uc.a.run.app
+source activate.sh
+echo "$SUBAGENT_URL"     # e.g. https://race-data-subagent-abc123-uc.a.run.app
 ```
 
-You'll paste `SERVICE_URL` into the schema's `servers:` block (no trailing slash).
+Or fetch it directly:
+
+```bash
+gcloud run services describe race-data-subagent --region "$REGION" --format='value(status.url)'
+```
+
+You'll paste this URL into the schema's `servers:` block (no trailing slash).
 
 ## 1. Open CX Agent Studio
 

@@ -68,6 +68,18 @@ if [[ -z "${TOOLBOX_URL:-}" ]]; then
 fi
 export TOOLBOX_URL
 
+# --- Race-data subagent URL (auto-discovered; same pattern as TOOLBOX_URL). This
+# is the BASE Cloud Run URL of the race-data-subagent — paste it as SERVICE_URL in
+# the CX OpenAPI tool schema (solution/race_data_subagent/openapi_ask_race_data.yaml).
+# No-op until setup/7_deploy_subagent.sh has run. Override the service name with
+# SUBAGENT_SERVICE if you deployed under a different name. ---
+SUBAGENT_SERVICE="${SUBAGENT_SERVICE:-race-data-subagent}"
+if [[ -z "${SUBAGENT_URL:-}" ]]; then
+    echo ">>> Discovering SUBAGENT_URL (quick no-op if ${SUBAGENT_SERVICE} isn't deployed yet)..."
+    SUBAGENT_URL="$(timeout 10 gcloud run services describe "$SUBAGENT_SERVICE" --region "$REGION" --format='value(status.url)' 2>/dev/null || true)"
+fi
+export SUBAGENT_URL
+
 # --- Agent mode (chunk 13) ---
 # local  = InMemoryRunner in-process (the dev path, default)
 # engine = the deployed Agent Engine (set AGENT_MODE=engine before sourcing,
@@ -99,6 +111,8 @@ echo "  Venv:       $VENV_DIR"
 echo "  Python:     $(python3 --version)"
 echo "  Agent mode: $AGENT_MODE"
 echo "  Agent pkg:  $AGENT_PACKAGE"
+echo "  Toolbox:    ${TOOLBOX_URL:-(none — run setup/all.sh)}"
+echo "  Subagent:   ${SUBAGENT_URL:-(none — run setup/7_deploy_subagent.sh)}"
 if [[ -n "${AGENT_ENGINE_RESOURCE:-}" ]]; then
     echo "  Engine:     $AGENT_ENGINE_RESOURCE"
 else
