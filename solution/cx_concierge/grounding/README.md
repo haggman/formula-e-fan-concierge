@@ -45,7 +45,7 @@ ingests from. The generated profiles are build artifacts and are not committed h
 3. **Index for CX (students, in the UI):** create **two** Vertex AI Search data stores —
    **FE Rules** (over `grounding/rules/`) and **Driver & Team Profiles** (over
    `grounding/profiles/`) — and attach both to the concierge as a **Data store tool**. Full
-   walkthrough in `../DATASTORE_SETUP.md`. (Instructor stages the `.txt` corpus; students do
+   walkthrough in `../BUILD_CONCIERGE.md` (Step 1). (Instructor stages the `.txt` corpus; students do
    the data stores + wiring as the grounding lesson — same pattern as the MLB build.)
 4. The concierge combines the data store (bios/rules) + the race-data subagent (live/stats)
    + **Google Search** (long tail), grounded so it answers only from those sources.

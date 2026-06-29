@@ -22,4 +22,4 @@ Vertex AI Search ingestion form), and updates the dataset catalog. It's verified
 (structural, identifier, coverage, spoiler-free, and an LLM fact-check judge).
 
 **To use them:** the Vertex AI Search data store ingests from the bucket path above — see
-`../../DATASTORE_SETUP.md`. The repo never needs a copy.
+`../../BUILD_CONCIERGE.md` (Step 1). The repo never needs a copy.
