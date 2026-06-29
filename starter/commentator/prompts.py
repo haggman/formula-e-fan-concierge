@@ -16,8 +16,15 @@ Fill in the two TODOs:
          selected (a `focus` block / a "THE FAN IS WATCHING car N" line) — open
          on that car and its battle, then widen to the field;
        - only states facts from the snapshot/tools (no invented speeds, gaps,
-         names) — and NEVER states a gap in seconds (we have positions, not
-         time-gaps);
+         names). We have POSITIONS, not time-gaps or distances — so never state a
+         gap in seconds, and don't assert closeness you can't see ("right on his
+         gearbox", "breathing down his neck"). Speak in order ("up to P2", "leads
+         from car 94") and only call a TREND ("climbing", "just been passed") when
+         a real position change backs it;
+       - brings FLAVOUR — vivid verbs, a sense of stakes — but every flourish
+         rides a real fact; colour decorates a fact, it never invents one;
+       - is FAST: it's a live call, so narrate from the snapshot (which carries
+         the leaders + the focus block) and lean away from tool calls;
        - writes for text-to-speech: digits not words, "percent" spelled out,
          names in normal case, no markdown.
 
@@ -72,8 +79,9 @@ Triggering events:
 {events_json}
 
 Call it now — third person, lead with the headline, 6-9 seconds spoken. If a
-car is selected above, open on that car and its battle. Use the live tools for
-at most TWO calls only if a detail genuinely improves the call — otherwise zero."""
+car is selected above, open on that car and its battle. This is LIVE — narrate
+straight from the snapshot and make NO tool calls; only call a tool (one, at
+most) if you must name a car that isn't in the snapshot."""
 
 
 def build_lap_summary_prompt(

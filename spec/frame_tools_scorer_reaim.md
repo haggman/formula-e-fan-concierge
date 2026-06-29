@@ -153,3 +153,32 @@ harness (`--select <car>` simulates the fan's click). Full live procedure:
 `CommentatorLoop` + the `{type:"select"}` websocket handler is the frontend rewire
 (#7); the `setup/8_deploy_cloud.sh` rename is #8/deploy. The commentator package,
 loop, scorer, tools, and harness are complete and consumed by that rewire.
+
+### Live-run findings & prompt tuning (2026-06-29, on the Qwiklabs replay)
+
+First live run (both `local_commentator.py` modes against the Berlin R10 sim)
+confirmed the design: field-wide mode spreads across leaders / AM clusters /
+recaps; `--select 13` narrowed every fired call onto car 13 (each scored 110 =
+70 overtake + 25 selected + 15 lead-battle, so must-say). Driver names resolved
+from the frame data; the scorer's debounce visibly suppressed the long tail.
+Three behaviours got tuned **in the persona/builders** (not the scorer):
+
+1. **Latency.** Tool-using turns ran 15–25 s (vs 6–9 s otherwise) — too slow for a
+   live call. The snapshot already carries the leaders + focus + Attack Mode, so
+   the event-reaction builder and the DATA-DISCIPLINE prompt now say *narrate from
+   the snapshot, make zero tool calls* unless a needed car is absent.
+2. **Unfounded closeness.** The model used "right on his gearbox" / "breathing down
+   his neck" — gap claims it can't support (positions only, no time-gaps). The
+   GAPS section now bans closeness phrasing and allows only order ("up to P2") plus
+   data-backed trends ("climbing" when a position actually changed).
+3. **Flavour.** Added explicit licence for vivid verbs / stakes / circuit colour —
+   provided every flourish rides a real fact — and a "vary your phrasing" nudge
+   (the run repeated "slices past").
+
+**Tuning levers if needed later (not changed):** select-mode is intentionally
+eager — every selected-car overtake is must-say (`SELECTED_CAR_MUST_SAY_MIN=80`),
+so raising that constant calms a too-chatty "my car" feed. `DEFAULT_THRESHOLD`,
+`debounce_s`, and `must_say_gap_s` (loop/harness args) trade coverage for calm.
+One thing to spot-check on any run: a "safety car" mention is only honest if the
+snapshot's `race_phase` was actually `safety_car` — it's grounded by the prompt,
+but worth confirming on a busy replay.

@@ -125,3 +125,12 @@ complete and proven; the frontend rewire consumes them.
 - **Model:** `FE_MODEL` (default `gemini-3.5-flash`); under sustained 429s, a GA
   model on a regional endpoint is the escape (`export FE_MODEL=gemini-2.5-flash
   GOOGLE_CLOUD_LOCATION=us-central1`).
+- **Pace it for a busy stretch:** to demo a dramatic moment, `/jump` to a lap and
+  let it **play forward** (don't pause) so events flow from there; a frozen race
+  produces no triggers.
+- **Tuning levers** (from the first live run — see `spec/frame_tools_scorer_reaim.md`
+  §5): the persona now narrates from the snapshot and avoids tool calls to stay
+  fast; it speaks in positions, not seconds or "on his gearbox" closeness. If the
+  `--select` feed feels too chatty, raise `SELECTED_CAR_MUST_SAY_MIN` in
+  `shared/scorer.py`; `--threshold` / `--debounce` / `--must-say-gap` trade
+  coverage for calm. Ctrl-C now exits cleanly (no traceback).

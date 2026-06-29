@@ -250,7 +250,10 @@ def main():
                         help="guarantee a field recap at least every N laps")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
-    asyncio.run(amain(args))
+    try:
+        asyncio.run(amain(args))
+    except KeyboardInterrupt:
+        print("\nStopped (Ctrl-C).")
 
 
 if __name__ == "__main__":
