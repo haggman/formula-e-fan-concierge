@@ -1,22 +1,25 @@
-# Profiles — generated grounding docs
+# Profiles — generated, and they live in the bucket (not the repo)
 
-This folder holds the **generated** driver and team profiles for the CX concierge's
-RAG data store. They are produced by `../build_profiles.ipynb` (Colab Enterprise),
-which reads the FE entry list + career stats **read-only** and uses Vertex AI Gemini
-to write several-paragraph profiles **grounded in the structured stats**.
+The driver and team profiles are **generated build artifacts**, so they are **not
+committed here**. The source of truth is the GCS bucket; this repo keeps the *recipe*
+(the `../build_profiles.ipynb` notebook) and the authored `../rules/` source, not the
+generated output.
 
-Expected layout once the notebook has run and you've committed its output:
+**Where the profiles live (canonical):**
 
 ```
-profiles/
-  drivers/<short_code>.md     e.g. dac.md, cas.md, eva.md   (one per R10 entrant)
-  teams/<team-slug>.md        one per team
+gs://class-demo/formula-e/grounding/profiles/
+  drivers/<short_code>.txt        one per FE driver (comprehensive: all of the career table)
+  teams/<team-slug>.txt           one per FE team (all teams in the 10-season results)
+  driver_profiles.parquet         the structured table
+  team_profiles.parquet
+  profiles.jsonl                  records (id, metadata, content) for structured import
 ```
 
-To populate: run `build_profiles.ipynb`, then download its
-`gs://class-demo/formula-e/grounding/profiles/drivers|teams/*.md` output into here so the
-docs are version-controlled alongside the rules pack. The canonical `driver_profiles.parquet`
-/ `team_profiles.parquet` live at `gs://class-demo/formula-e/grounding/profiles/` (and/or
-BigQuery) as the data artifacts students consume.
+**To (re)generate:** run `../build_profiles.ipynb` in Colab Enterprise. It reads the FE
+career/results tables **read-only**, writes the profiles to the bucket above (`.txt` is the
+Vertex AI Search ingestion form), and updates the dataset catalog. It's verified five ways
+(structural, identifier, coverage, spoiler-free, and an LLM fact-check judge).
 
-Source data is never modified — these are new artifacts.
+**To use them:** the Vertex AI Search data store ingests from the bucket path above — see
+`../../DATASTORE_SETUP.md`. The repo never needs a copy.

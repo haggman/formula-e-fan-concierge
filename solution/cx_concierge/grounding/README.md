@@ -1,9 +1,13 @@
 # CX grounding assets (rules pack + profiles)
 
-Source documents for the CX concierge's RAG data store. **Authored / generated**, not
-harvested — the staged FE dataset has no driver-bio/team-history corpus and no rules
-document (PLAN.md §5). This folder is where the grounding content lives so it's
-version-controlled; a Vertex AI Search data store is then pointed at it (next step).
+Grounding for the CX concierge's RAG data store. **Authored / generated**, not harvested —
+the staged FE dataset has no driver-bio/team-history corpus and no rules document (PLAN.md §5).
+
+Split of responsibilities: this folder version-controls the **recipe** — the authored
+`rules/` source and the `build_profiles.ipynb` generator. The **data products** (the rules
+`.txt`, the generated profiles, parquet/jsonl) live in the **bucket**
+(`gs://class-demo/formula-e/grounding/`), which is what the Vertex AI Search data store
+ingests from. The generated profiles are build artifacts and are not committed here.
 
 ## Contents
 
@@ -33,8 +37,9 @@ version-controlled; a Vertex AI Search data store is then pointed at it (next st
      `for f in rules/*.md; do gcloud storage cp "$f" "gs://class-demo/formula-e/grounding/rules/$(basename "${f%.md}").txt"; done`
 2. Run `build_profiles.ipynb` in Colab Enterprise → **comprehensive** parquet + `.txt`
    (ingestion) profiles for **all FE drivers + teams** + `profiles.jsonl`, written to
-   `gs://class-demo/formula-e/grounding/profiles/`; commit the `.txt` into `profiles/` for
-   version control. The notebook's final cell **updates the dataset catalog**
+   `gs://class-demo/formula-e/grounding/profiles/`. These are **build artifacts — they live
+   in the bucket, not the repo** (the repo keeps the generator notebook + the authored
+   rules source). The notebook's final cell **updates the dataset catalog**
    (`reference/data_manifest.json` + `data_dictionary.md`) idempotently, backing both up to
    `reference/_backups/<ts>/` first.
 3. **Index for CX (students, in the UI):** create **two** Vertex AI Search data stores —
