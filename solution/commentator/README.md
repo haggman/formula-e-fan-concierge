@@ -40,7 +40,35 @@ back out. See `spec/frame_tools_scorer_reaim.md` for the boost mechanics.
 
 ## Files
 
-- `agent.py` — ADK `root_agent` wiring (model, retry, field-wide frame tools, TTS hook).
-- `config.py` — race scope, AM constants, the `race_time → 2024 wall clock` bridge.
-- `prompts.py` — broadcast persona + selection-aware instruction.
-- `tools/frame_tools.py` — field-wide live-state tools (see spec).
+- `agent.py` — ADK `root_agent` wiring (model, retry, the four field-wide frame
+  tools; no Toolbox — the commentator narrates "now", it doesn't query BigQuery).
+- `config.py` — race scope, AM constants, the `race_time → 2024 wall clock` bridge
+  (no car identity — the commentator is field-wide).
+- `prompts.py` — broadcast persona + selection-aware instruction + the proactive
+  trigger-prompt builders (with the `watching` injection).
+- `snapshot.py` — field-wide authoritative snapshot (leading order + focus block).
+- `tools/frame_tools.py` — field-wide live-state tools (`get_field_state(selected_car)`
+  + focus block; `get_recent_events` / `get_events_in_range` / `get_field_am_status`
+  ported from Ch2). See `spec/frame_tools_scorer_reaim.md`.
+
+The loop, scorer, and state reader live outside the package: the selection-aware
+`frontend/commentator_loop.py`, the field-wide `shared/scorer.py`, and the
+vendored `shared/state_client.py`.
+
+## Status & verification (built 2026-06-29)
+
+Built and verified. The scorer re-aim, the field-wide tools + focus block, and
+the selection-aware loop are proven offline (no GCP) by
+`scripts/verify_commentator_offline.py` — all checks pass. The live, sim-driven
+end-to-end (the commentator calling real replay events and following a selected
+car) is in `deploy/RUNBOOK_commentator.md`:
+
+```bash
+python scripts/verify_commentator_offline.py        # no GCP — logic proof
+python scripts/test_frame_tools.py --live           # field-wide tools vs live Firestore
+python scripts/local_commentator.py --select 13 --verbose   # watch it narrow onto car 13
+```
+
+The `{type:"select"}` websocket handler in `frontend/main.py` and the `setup/8`
+deploy rename are the frontend/deploy rewire (#7/#8) — the package, loop, scorer,
+and tools are complete and ready for them to consume.

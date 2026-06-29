@@ -48,10 +48,11 @@ The canonical architecture for Challenge 1. Supersedes the ASCII sketch in
 | MCP Toolbox (14 BQ tools) | **Kept** | `toolbox/tools.yaml` |
 | BigQuery (R10 + 10-season career) | **Kept**; subagent may range over all, time-honest | — |
 | TTS | **Kept** | `frontend/tts.py` |
-| Trigger/scorer pattern | **Re-aimed**: field-wide + selected-car boost | `shared/scorer.py` + `spec/frame_tools_scorer_reaim.md` |
-| Frame tools | **Re-aimed**: field-wide + `selected_car` | `*/commentator/tools/frame_tools.py` |
-| Fan UI | **Given**, reworked for map + selection + stats + CX widget | `frontend/` |
-| Commentator agent | **New** (ADK), forked from race engineer | `*/commentator/` |
+| Trigger/scorer pattern | **Re-aimed ✅ built**: field-wide + selected-car boost | `shared/scorer.py` + `spec/frame_tools_scorer_reaim.md` §5 |
+| Frame tools | **Re-aimed ✅ built**: `get_field_state(selected_car)` + focus block | `*/commentator/tools/frame_tools.py` |
+| Commentator loop | **New ✅ built**: selection-aware fork of engineer_loop | `frontend/commentator_loop.py` |
+| Fan UI | **Given**, reworked for map + selection + stats + CX widget (#7) | `frontend/` |
+| Commentator agent | **New ✅ built** (ADK), forked from race engineer; verified offline, live runbook ready | `*/commentator/` + `deploy/RUNBOOK_commentator.md` |
 | Race-data subagent | **New** (ADK), owns now+then, deployed to **Cloud Run** (CX OpenAPI tool) | `*/race_data_subagent/` |
 | CX concierge | **New** (CX low-code), MCP + RAG + Search | `*/cx_concierge/` |
 | Starter race_engineer | **Left behind** | (not vendored) |
@@ -83,13 +84,22 @@ A–F sequence of Ch2 (open #8 resolved: parallel by package, each with its own 
 
 ## Known vendored-infra rewires (build-time, not done this session)
 
-The skeleton vendors Ch2 infra **as-is**; these still reference the old `solution.race_engineer`
-package via the `AGENT_PACKAGE` seam and get re-pointed to `commentator` during the build:
-`frontend/engineer_loop.py` (→ `commentator_loop.py`), `frontend/agent_client.py`,
-`shared/agent_pkg.py` (the seam default), `activate.sh`, `setup/8_deploy_cloud.sh`
-(was `7_deploy_cloud.sh`; renumbered — `setup/7_deploy_subagent.sh` is now this lab's
-race-data-subagent deploy), `deploy/build_engine_app.py`, `deploy/deploy_frontend.sh`,
-and `scripts/*` (local_test,
-agent_chat, stage_probe, test_frame_tools). `shared/scorer.py` keeps Ch2's car-13 weights until
-the re-aim lands (`spec/frame_tools_scorer_reaim.md`). All intentional: this session locks the
-architecture and lays out the repo; code adaptation is spec'd, not implemented.
+The skeleton vendored Ch2 infra **as-is**, referencing the old `race_engineer` package via the
+`AGENT_PACKAGE` seam. The commentator build (#9 + #4, 2026-06-29) re-pointed and adapted the
+pieces it owns; the rest stay for #7/#8.
+
+**Done in the commentator build:**
+- `shared/scorer.py` — re-aimed field-wide + selected-car boost (was Ch2 car-13 weights).
+- `shared/agent_pkg.py` seam default → `solution.commentator`; `activate.sh` default →
+  `starter.commentator` (the `race_engineer` package is left behind / absent).
+- `frontend/commentator_loop.py` — new, the selection-aware fork of `engineer_loop.py`.
+- `scripts/test_frame_tools.py` — retargeted to the field-wide tools; new
+  `scripts/local_commentator.py` (live harness) and `scripts/verify_commentator_offline.py`
+  (no-GCP check).
+
+**Still to rewire (#7 frontend / #8 deploy):** `frontend/main.py` (swap `EngineerLoop` →
+`CommentatorLoop`, drop `OUR_CAR_NUMBER`, read `shared.state_client`, add the `{type:"select"}`
+handler), `frontend/agent_client.py` `APP_NAME` cosmetic, `setup/8_deploy_cloud.sh` rename,
+`deploy/build_engine_app.py` / `deploy/deploy_frontend.sh`, and the leftover Ch2 scripts
+(`local_test.py`, `agent_chat.py`, `stage_probe.py`) which still name `race_engineer`.
+`frontend/engineer_loop.py` is superseded by `commentator_loop.py` and can be deleted in #7.

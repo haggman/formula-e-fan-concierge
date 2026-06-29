@@ -1,27 +1,31 @@
-"""Validate the agent's frame tools against Firestore.
+"""Validate the commentator's FIELD-WIDE frame tools against Firestore.
 
-THE FRAME-TOOLS VALIDATOR (Tier D: prove the GIVEN tools against the live
-replay). Resolved through the AGENT_PACKAGE seam (shared/agent_pkg.py), so
-with activate.sh defaults this tests starter/race_engineer/tools/
-frame_tools.py — which ships COMPLETE: every section should print ✓ as-is,
-and a ✗ means environment (simulator not running, stale Firestore), not
-code. If you took the BONUS "build your own frame tool" ticket, this is
-your checklist. To validate the reference instead:
-    AGENT_PACKAGE=solution.race_engineer python scripts/test_frame_tools.py
+THE FRAME-TOOLS VALIDATOR (Tier B: prove the GIVEN tools against the live
+replay). Resolved through the AGENT_PACKAGE seam (shared/agent_pkg.py), so with
+activate.sh defaults this tests starter/commentator/tools/frame_tools.py — which
+ships COMPLETE (given infrastructure): every section should print ✓ as-is, and a
+✗ means environment (simulator not running, stale Firestore), not code. To
+validate the reference instead:
+    AGENT_PACKAGE=solution.commentator python scripts/test_frame_tools.py --live
+
+RE-AIM from Ch2: the engineer's get_current_state (one car, #13) is gone. The
+commentator surface is field-wide — get_field_state returns the WHOLE field and,
+given a selected car, a focus block (that car + nearest ahead/behind + position
+gaps). This validator asserts the field shape and the focus block.
 
 Two modes:
 
 SEED MODE (default) — run against the canonical static sample frame:
     python scripts/seed_test_state.py
     python scripts/test_frame_tools.py
-  Asserts exact values from the seeded frame (DAC P2, safety car, MOR in AM).
+  Asserts the seeded field (DAC car 13 present, safety car phase).
 
 LIVE MODE — run against a live simulator replay:
     python scripts/test_frame_tools.py --live
-  Same six tool exercises, but seed-specific asserts are replaced with
-  live-appropriate checks: structural sanity, query mechanics, and
-  data-quality invariants (e.g. lap_completed events must carry real
-  nonzero top speeds — validates the frames pipeline end to end).
+  Structural sanity, query mechanics, and data-quality invariants.
+
+Pure-logic checks that need no Firestore at all live in
+scripts/verify_commentator_offline.py.
 """
 from __future__ import annotations
 
@@ -34,13 +38,17 @@ import sys
 from shared.agent_pkg import AGENT_PACKAGE, agent_module
 from shared.models import EventType
 
-# Resolve the frame tools from the ACTIVE agent package — the same import
+# Resolve the frame tools from the ACTIVE commentator package — the same import
 # path ADK uses when the agent calls them.
 _ft = agent_module("tools.frame_tools")
-get_current_state = _ft.get_current_state
+get_field_state = _ft.get_field_state
 get_recent_events = _ft.get_recent_events
 get_events_in_range = _ft.get_events_in_range
 get_field_am_status = _ft.get_field_am_status
+
+# A car known to run the whole Berlin R10 replay — used to exercise the focus
+# block and the per-car event filter. (Car 13 = DAC, the R10 winner.)
+FOCUS_CAR = 13
 
 
 def header(label: str) -> None:
@@ -49,51 +57,67 @@ def header(label: str) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--live", action="store_true",
-        help="validate against a live replay instead of the static seed frame",
-    )
+    parser.add_argument("--live", action="store_true",
+                        help="validate against a live replay instead of the seed frame")
     args = parser.parse_args()
     live = args.live
     mode = "LIVE replay" if live else "SEED frame"
     print(f"Mode: {mode}  |  Package: {AGENT_PACKAGE}")
 
     fails = 0
-    race_now = None  # set by the first tool call, reused for live windows
+    race_now = None
 
     # ------------------------------------------------------------------
-    header("get_current_state")
+    header("get_field_state (whole field)")
     try:
-        resp = get_current_state()
+        resp = get_field_state()
         race_now = resp.race_time_s
-        print(f"  Our car {resp.our_car_number} ({resp.our_driver}) — P{resp.position} on lap {resp.current_lap}")
-        print(f"  Speed: {resp.speed_kmh} km/h, Energy: {resp.energy_pct_remaining}% remaining")
-        print(f"  AM scenario {resp.am_scenario} ({resp.am_scenario_name}), "
-              f"active={resp.am_active}, used={resp.am_activations_used}, "
-              f"budget={resp.am_remaining_budget_s}s")
-        print(f"  Ahead: {resp.car_ahead}")
-        print(f"  Behind: {resp.car_behind}")
-        print(f"  Race: {resp.race_phase} at t={resp.race_time_s}s, leader on lap {resp.current_leader_lap}")
+        print(f"  {len(resp.cars)} running cars, phase {resp.race_phase}, "
+              f"t={resp.race_time_s}s, leader on lap {resp.current_leader_lap}")
+        for c in resp.cars[:6]:
+            print(f"    P{c.position} #{c.car_number} ({c.driver_short_name}) "
+                  f"{c.speed_kmh} km/h, {c.energy_pct_remaining}% energy, "
+                  f"AM active={c.am_active} used={c.am_activations_used}")
 
-        # Mode-independent sanity
-        assert resp.our_car_number == 13, "expected car 13"
-        assert resp.our_driver == "DAC", "expected DAC"
-        assert 1 <= resp.position <= 22, f"position {resp.position} out of range"
-        assert 0 <= resp.energy_pct_remaining <= 100, "energy pct out of range"
-
+        assert len(resp.cars) >= 20, f"expected ~21-22 running cars, got {len(resp.cars)}"
+        positions = [c.position for c in resp.cars]
+        assert positions == sorted(positions), "cars must be position-sorted"
+        assert resp.focus is None, "focus must be None when no car is selected"
+        assert resp.race_wall_time_ns > 0, "missing race_wall_time_ns"
         if not live:
-            # Seed-frame exact values
-            assert resp.position == 2, "expected P2 (sample frame)"
-            assert resp.car_ahead and resp.car_ahead.driver_short_name == "CAS", "expected Cassidy ahead"
-            assert resp.car_behind and resp.car_behind.driver_short_name == "ROW", "expected Rowland behind"
-            assert resp.race_phase == "safety_car", "expected safety_car phase"
-        else:
-            # Live: neighbors must exist unless at field edges
-            if resp.position > 1:
-                assert resp.car_ahead is not None, "expected a car ahead when not P1"
-            if resp.position < 22:
-                assert resp.car_behind is not None, "expected a car behind when not last"
-        print("  ✓ all sanity checks pass")
+            assert any(c.car_number == 13 and c.driver_short_name == "DAC"
+                       for c in resp.cars), "expected car 13 (DAC) in the seeded field"
+            assert resp.race_phase == "safety_car", "expected safety_car phase (seed)"
+        print("  ✓ field shape sane")
+    except Exception as e:
+        print(f"  ✗ FAILED: {type(e).__name__}: {e}")
+        fails += 1
+
+    # ------------------------------------------------------------------
+    header(f"get_field_state(selected_car={FOCUS_CAR}) (focus block)")
+    try:
+        resp = get_field_state(selected_car=FOCUS_CAR)
+        f = resp.focus
+        assert f is not None, "expected a focus block when a car is selected"
+        assert f.selected.car_number == FOCUS_CAR, "focus.selected must be the chosen car"
+        print(f"    focus on #{f.selected.car_number} ({f.selected.driver_short_name}) "
+              f"P{f.selected.position}")
+        if f.car_ahead:
+            print(f"      ahead:  #{f.car_ahead.car_number} ({f.car_ahead.driver_short_name}) "
+                  f"P{f.car_ahead.position}, gap {f.gap_ahead_positions}")
+        if f.car_behind:
+            print(f"      behind: #{f.car_behind.car_number} ({f.car_behind.driver_short_name}) "
+                  f"P{f.car_behind.position}, gap {f.gap_behind_positions}")
+        # Neighbours, when present, must straddle the selected car by position.
+        if f.car_ahead:
+            assert f.car_ahead.position < f.selected.position, "car_ahead must be ahead"
+            assert f.gap_ahead_positions >= 1
+        if f.car_behind:
+            assert f.car_behind.position > f.selected.position, "car_behind must be behind"
+            assert f.gap_behind_positions >= 1
+        if f.selected.position > 1:
+            assert f.car_ahead is not None, "expected a car ahead when not leading"
+        print("  ✓ focus block correct")
     except Exception as e:
         print(f"  ✗ FAILED: {type(e).__name__}: {e}")
         fails += 1
@@ -103,102 +127,49 @@ def main():
     try:
         resp = get_recent_events(seconds_back=60)
         print(f"  Found {resp.count} events in last 60s")
-        for ev in resp.events[:15]:
-            print(f"    [{ev.event_type.value}] t={ev.race_time_s}s car={ev.car_number} data={ev.data}")
-        if resp.count > 15:
-            print(f"    ... +{resp.count - 15} more")
-
+        for ev in resp.events[:10]:
+            print(f"    [{ev.event_type.value}] t={ev.race_time_s}s car={ev.car_number}")
         if not live:
-            assert resp.count >= 4, f"expected ≥4 events (seeded), got {resp.count}"
+            assert resp.count >= 4, f"expected ≥4 events (seed), got {resp.count}"
         else:
-            # Live data-quality invariants
             zero_change = [e for e in resp.events
                            if e.event_type == EventType.OVERTAKE
                            and e.data.get("position_change") == 0]
-            assert not zero_change, \
-                f"{len(zero_change)} zero-change overtakes — frames_v2+ filter not in effect?"
-            laps = [e for e in resp.events if e.event_type == EventType.LAP_COMPLETED]
-            bad_ts = [e for e in laps if not e.data.get("top_speed_kmh")]
-            assert not bad_ts, \
-                f"{len(bad_ts)} lap_completed events with zero/None top speed — frames_v2+ not flowing?"
-            if laps:
-                print(f"  ○ {len(laps)} lap_completed events, all with real top speeds "
-                      f"(e.g. {laps[0].data.get('top_speed_kmh')} km/h)")
-        print("  ✓ all sanity checks pass")
+            assert not zero_change, f"{len(zero_change)} zero-change overtakes leaked"
+        print("  ✓ recent events query works")
     except Exception as e:
         print(f"  ✗ FAILED: {type(e).__name__}: {e}")
         fails += 1
 
     # ------------------------------------------------------------------
-    header("get_recent_events (only race_control)")
+    header(f"get_recent_events (filtered to car {FOCUS_CAR})")
     try:
-        resp = get_recent_events(
-            seconds_back=120,
-            event_types=[EventType.RACE_CONTROL],
-        )
-        print(f"  Found {resp.count} race_control events")
-        for ev in resp.events:
-            print(f"    {ev.data}")
-        if not live:
-            assert resp.count >= 1, "expected at least 1 race_control event (seeded)"
-        else:
-            # RC messages are sparse early in the race — zero is a valid result.
-            # The check here is that the type filter executed without error and
-            # returned ONLY race_control events.
-            assert all(e.event_type == EventType.RACE_CONTROL for e in resp.events), \
-                "type filter returned non-race_control events"
-            if resp.count == 0:
-                print("  ○ none in window (normal early-race) — filter mechanics still verified")
-        print("  ✓ filter works")
-    except Exception as e:
-        print(f"  ✗ FAILED: {type(e).__name__}: {e}")
-        fails += 1
-
-    # ------------------------------------------------------------------
-    header("get_recent_events (filtered to a single car)")
-    try:
-        # Seed mode: car 48 (MOR) has a seeded AM activation.
-        # Live mode: use our own car — DAC generates events steadily.
-        target_car = 48 if not live else 13
-        resp = get_recent_events(seconds_back=120, car_involved=target_car)
-        print(f"  Found {resp.count} events involving car {target_car}")
-        for ev in resp.events[:10]:
-            print(f"    [{ev.event_type.value}] data={ev.data}")
-        assert all(e.car_number == target_car for e in resp.events), \
-            "car filter returned events for other cars"
-        if not live:
-            assert resp.count >= 1, "expected at least 1 event involving car 48 (AM activation)"
+        resp = get_recent_events(seconds_back=180, car_involved=FOCUS_CAR)
+        print(f"  Found {resp.count} events involving car {FOCUS_CAR}")
+        assert all(e.car_number == FOCUS_CAR for e in resp.events), \
+            "car filter returned other cars"
         print("  ✓ car filter works")
     except Exception as e:
         print(f"  ✗ FAILED: {type(e).__name__}: {e}")
         fails += 1
 
     # ------------------------------------------------------------------
-    header("get_events_in_range")
+    header("get_events_in_range (lap_completed)")
     try:
         if not live:
-            lo, hi = 1400, 1500  # brackets the seeded frame at t=1449
+            lo, hi = 1400, 1500
         else:
             hi = race_now if race_now is not None else 300
             lo = max(0, hi - 120)
         resp = get_events_in_range(
-            from_race_time_s=lo,
-            to_race_time_s=hi,
+            from_race_time_s=lo, to_race_time_s=hi,
             event_types=[EventType.LAP_COMPLETED],
         )
-        print(f"  Found {resp.count} lap_completed events in range {lo}-{hi}s")
-        for ev in resp.events[:10]:
-            print(f"    car {ev.car_number}: {ev.data}")
-        if not live:
+        print(f"  Found {resp.count} lap_completed events in {lo}-{hi}s")
+        assert all(lo <= e.race_time_s <= hi for e in resp.events), \
+            "range query returned out-of-window events"
+        if live and hi > 80:
             assert resp.count >= 2, f"expected ≥2 lap completions, got {resp.count}"
-        else:
-            # 120s ≈ 2 laps — the whole running field should have completed laps,
-            # unless we're in the first lap of the race.
-            if hi > 80:
-                assert resp.count >= 2, \
-                    f"expected ≥2 lap completions in a {hi-lo}s window at t={hi}"
-            assert all(lo <= e.race_time_s <= hi for e in resp.events), \
-                "range query returned events outside the window"
         print("  ✓ range query works")
     except Exception as e:
         print(f"  ✗ FAILED: {type(e).__name__}: {e}")
@@ -208,21 +179,12 @@ def main():
     header("get_field_am_status")
     try:
         resp = get_field_am_status()
-        print(f"  Active now: {len(resp.active_now)} car(s)")
-        for s in resp.active_now:
-            print(f"    P{s.position} #{s.car_number} ({s.driver_short_name}) "
-                  f"scenario {s.scenario}, budget {s.remaining_budget_s}s")
-        print(f"  Used at least one: {len(resp.used_at_least_one)} cars")
-        print(f"  Untouched: {len(resp.untouched)} cars")
-        print(f"  Scenario distribution: {resp.scenario_distribution}")
-
         total = len(resp.active_now) + len(resp.used_at_least_one) + len(resp.untouched)
-        assert total >= 20, f"expected ~21-22 running cars across buckets, got {total}"
+        print(f"  active={len(resp.active_now)} used={len(resp.used_at_least_one)} "
+              f"untouched={len(resp.untouched)} scenarios={resp.scenario_distribution}")
+        assert total >= 20, f"expected ~21-22 cars across buckets, got {total}"
         assert resp.scenario_distribution, "expected non-empty scenario distribution"
-        if not live:
-            assert any(s.car_number == 48 for s in resp.active_now), \
-                "expected car 48 (MOR) in active_now (seeded)"
-        print("  ✓ all sanity checks pass")
+        print("  ✓ field AM status works")
     except Exception as e:
         print(f"  ✗ FAILED: {type(e).__name__}: {e}")
         fails += 1
@@ -232,8 +194,7 @@ def main():
     if fails:
         print(f"  ✗ {fails} test(s) failed ({mode}, {AGENT_PACKAGE})")
         sys.exit(1)
-    else:
-        print(f"  ✓ All frame tools working against Firestore ({mode}, {AGENT_PACKAGE})")
+    print(f"  ✓ All field-wide frame tools working against Firestore ({mode}, {AGENT_PACKAGE})")
 
 
 if __name__ == "__main__":

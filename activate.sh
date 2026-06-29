@@ -87,12 +87,12 @@ export SUBAGENT_URL
 export AGENT_MODE="${AGENT_MODE:-local}"
 
 # --- Agent package (the starter/solution seam) ---
-# Which package the frontend and dev scripts load the agent from:
-#   starter.race_engineer  = the student build (DEFAULT — you work here)
-#   solution.race_engineer = the complete reference (the answer key)
+# Which package the frontend and dev scripts load the live commentator from:
+#   starter.commentator  = the student build (DEFAULT — you work here)
+#   solution.commentator = the complete reference (the answer key)
 # Instructors / demoing the reference:
-#   export AGENT_PACKAGE=solution.race_engineer   (before sourcing, or per-run)
-export AGENT_PACKAGE="${AGENT_PACKAGE:-starter.race_engineer}"
+#   export AGENT_PACKAGE=solution.commentator   (before sourcing, or per-run)
+export AGENT_PACKAGE="${AGENT_PACKAGE:-starter.commentator}"
 
 # Engine resource name — auto-loaded from the deploy script's record.
 ENGINE_RESOURCE_FILE="${REPO_ROOT}/deploy/.engine_resource"
@@ -103,7 +103,7 @@ fi
 # --- Status ---
 echo ""
 echo "=================================================================="
-echo "  formula-e-race-engineer activated"
+echo "  formula-e-fan-concierge activated"
 echo "=================================================================="
 echo "  Project:    $PROJECT_ID"
 echo "  Region:     $REGION"

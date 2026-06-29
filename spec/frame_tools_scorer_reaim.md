@@ -85,3 +85,71 @@ blind to the rest of the field.
 - `scripts/test_frame_tools.py` → assert field-wide shape + the `focus` block for a selection.
 - Scorer unit tests → drop "our car" fixtures; add "event near selected car outranks equal
   event elsewhere" and "no selection → pure significance ordering."
+
+---
+
+## 5. BUILT — resolutions & learnings (2026-06-29)
+
+#9 and #4 (the commentator) are implemented and verified. What landed, and the
+decisions made while building:
+
+**Scorer (`shared/scorer.py`).** Re-aimed exactly to §2: dropped the `SCORE_WE_*` /
+`SCORE_OUR_AM_*` / `RC_INVOLVES_US` constants and the `our_car` / `prev_our_position`
+params. New signature is `score(state, new_events, *, selected_car=None,
+recent_am_activations=0, prev_positions=None)`. Constants as spec'd
+(`SCORE_OVERTAKE=70`, `SCORE_AM_ACTIVATED=60`, `SCORE_AM_CLUSTER=75`,
+`SCORE_POSITION_SWING_BASE=55`, `SELECTED_CAR_BOOST=25`, `LEAD_BATTLE_BOOST=15`),
+RC severity table kept verbatim. Added while building (small, documented):
+`PODIUM_MAX=3` (the "near the lead" cutoff for `LEAD_BATTLE_BOOST`),
+`RC_MUST_SAY_MIN=88` (safety car / red / chequered — the field-critical must-say
+floor, unchanged from Ch2's 88), and `SELECTED_CAR_MUST_SAY_MIN=80` (a boosted
+selected-car event at/above this becomes must-say, so the broadcast never skips
+what the fan is watching). `_is_neighbor` is now symmetric (any two cars);
+`_rc_names_us` → `_rc_names_car(e, car)`. Two judgement calls: an Attack-Mode
+activation "involves the selected car" if it's the selected car **or a car
+directly next to it** (a rival arming 50 kW is news for the fan's battle); AM
+**deactivation** is a quiet beat field-wide, so it's only emitted for the selected
+car. Position swings now scan every running car off `prev_positions`.
+
+**Frame tools (`*/commentator/tools/frame_tools.py`).** `get_field_state(selected_car=None)`
+returns `FieldStateResponse { cars: list[CarLine], focus: FocusBlock|None,
+selected_car, race_phase, race_time_s, current_leader_lap, race_wall_time_ns }`.
+`CarLine` = number, driver, position, lap, speed, energy %, AM (active / used /
+scenario / budget). `FocusBlock` = the selected car + nearest **running** car
+ahead/behind + **position** gaps (`gap_ahead_positions` / `gap_behind_positions`)
+— never seconds; a gap > 1 means cars between retired. `OUR_CAR_NUMBER` /
+`_require_our_car` deleted. `get_recent_events` / `get_events_in_range` /
+`get_field_am_status` ported unchanged. The tools read the **vendored
+`shared.state_client`** — the commentator package has no per-package state_client
+(one fewer file for students), so the seam no longer resolves `tools.state_client`.
+
+**Snapshot (`*/commentator/snapshot.py`).** Re-aimed field-wide:
+`snapshot_dict(state, selected_car=None)` pins the leading order (top 6) plus a
+focus block for the selected car. Replaces Ch2's car-13 snapshot.
+
+**Loop (`frontend/commentator_loop.py`, new).** Fork of `engineer_loop.py`. Holds
+`selected_car` via `set_selection(n)` (called from the websocket `{type:"select"}`
+message), tracks `prev_positions` as a dict across polls, keys lap **recaps** off
+`current_leader_lap` (the field's lap, not one car's), and injects a "the fan is
+watching car N (driver)" line + the focus snapshot into each trigger prompt. All
+Ch2 trigger policy kept (per-type debounce, must-say hold + TTL, overdue-recap
+guarantee, drop-don't-crash, replay-restart reset). Constructor takes optional
+`agent_client` / `state_client` for offline testing. Deliveries broadcast as
+`{type:"radio", kind, text, selected_car, ...}`.
+
+**Seam re-point.** Ch2's `race_engineer` package was left behind, so the seam
+defaults pointed at a missing package. Re-pointed: `shared/agent_pkg.py` default →
+`solution.commentator`; `activate.sh` default → `starter.commentator`.
+
+**Verification.** `scripts/verify_commentator_offline.py` proves the scorer +
+frame tools + selection-aware loop against a seeded in-memory field with **no
+GCP** (all checks pass). `scripts/test_frame_tools.py` retargeted to the
+field-wide tools (seed + `--live`). `scripts/local_commentator.py` is the live
+harness (`--select <car>` simulates the fan's click). Full live procedure:
+`deploy/RUNBOOK_commentator.md`.
+
+**Deferred to #7/#8 (noted, not built):** `frontend/main.py` still imports Ch2's
+`EngineerLoop` / `OUR_CAR_NUMBER` / `tools.state_client` — swapping it to
+`CommentatorLoop` + the `{type:"select"}` websocket handler is the frontend rewire
+(#7); the `setup/8_deploy_cloud.sh` rename is #8/deploy. The commentator package,
+loop, scorer, tools, and harness are complete and consumed by that rewire.
