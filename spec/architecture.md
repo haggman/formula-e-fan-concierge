@@ -27,10 +27,10 @@ The canonical architecture for Challenge 1. Supersedes the ASCII sketch in
                   │ Race-Data Subagent · ADK          │                  │
    CX (low-code)  │  now_tools (Firestore) +          │                  │
    ┌───────────┐  │  ToolboxToolset (BigQuery)        │   time-honest:   │
-   │ CX        │  │  deployed to Agent Engine;        │   bound BQ by    │
-   │ Concierge │──┤  reached via Agent Registry/MCP   │   race_wall_time │
+   │ CX        │  │  deployed to Cloud Run;           │   bound BQ by    │
+   │ Concierge │──┤  reached via CX OpenAPI tool      │   race_wall_time │
    │ orchestr. │  │  tool: ask_race_data(question)    │   _ns from "now" │
-   └─────┬─────┘   registry/MCP     └────────┬──────────┘                 │
+   └─────┬─────┘   OpenAPI tool     └────────┬──────────┘                 │
          │ Data store/File search  ▼                                     │
          │ (profiles, rules)   ┌──────────────┐   ┌──────────────────────┴───┐
          │ + Google Search     │ MCP Toolbox  │──►│ BigQuery: R10 + 10-season │
@@ -52,7 +52,7 @@ The canonical architecture for Challenge 1. Supersedes the ASCII sketch in
 | Frame tools | **Re-aimed**: field-wide + `selected_car` | `*/commentator/tools/frame_tools.py` |
 | Fan UI | **Given**, reworked for map + selection + stats + CX widget | `frontend/` |
 | Commentator agent | **New** (ADK), forked from race engineer | `*/commentator/` |
-| Race-data subagent | **New** (ADK), owns now+then, deployed to **Agent Engine** | `*/race_data_subagent/` |
+| Race-data subagent | **New** (ADK), owns now+then, deployed to **Cloud Run** (CX OpenAPI tool) | `*/race_data_subagent/` |
 | CX concierge | **New** (CX low-code), MCP + RAG + Search | `*/cx_concierge/` |
 | Starter race_engineer | **Left behind** | (not vendored) |
 | architecture.svg | **Rebuild** | `docs/` + `spec/architecture_svg_plan.md` |
