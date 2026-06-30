@@ -37,13 +37,14 @@
   /* ---- left column: map (top) + order/stats (bottom) ---- */
   #left { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
 
-  #mapwrap { flex: 1 1 36%; min-height: 0; position: relative; border-bottom: 1px solid var(--line); }
+  #mapwrap { flex: 1 1 54%; min-height: 0; position: relative; border-bottom: 1px solid var(--line); }
   #map { width: 100%; height: 100%; display: block; }
 
-  /* horse-race gap strip: leader at left, spacing ∝ real along-track gap */
-  #gapwrap { flex: 0 0 auto; border-bottom: 1px solid var(--line); padding: 6px 0 8px; }
-  .striplabel { font-size: 10px; color: var(--dim); letter-spacing: 1.5px; padding: 0 12px 5px; }
-  #gapstrip { position: relative; height: 26px; margin: 0 12px; }
+  /* horse-race gap strip: FULL-WIDTH band under the header. leader at left,
+     spacing ∝ real along-track gap. */
+  #gapwrap { flex: 0 0 auto; border-bottom: 1px solid var(--line); padding: 7px 0 9px; background: #0b0f14; }
+  .striplabel { font-size: 10px; color: var(--dim); letter-spacing: 1.5px; padding: 0 16px 5px; }
+  #gapstrip { position: relative; height: 26px; margin: 0 16px; }
   .gapbox {
     position: absolute; top: 0; width: 24px; height: 24px; border-radius: 5px;
     background: var(--panel); border: 1px solid var(--line); color: var(--text);
@@ -161,6 +162,10 @@
   <button id="audio-toggle" class="muted">🔇 MUTED</button>
   <span class="conn down" id="conn">● connecting</span>
 </header>
+<div id="gapwrap">
+  <div class="striplabel">FIELD — leader at left · spacing ∝ gap · click to follow</div>
+  <div id="gapstrip"></div>
+</div>
 <main>
   <div id="left">
     <div id="mapwrap">
@@ -170,10 +175,6 @@
         <g id="cars"></g>
       </svg>
       <div id="map-msg">Loading track…</div>
-    </div>
-    <div id="gapwrap">
-      <div class="striplabel">FIELD — leader at left · spacing ∝ gap · click to follow</div>
-      <div id="gapstrip"></div>
     </div>
     <div id="leftlower">
       <div id="sel-head">
@@ -312,17 +313,20 @@ function renderGapStrip(cars) {
     items[i].gap = items[i - 1].gap + g;
   }
   const maxGap = items[items.length - 1].gap || 1;
-  const W = strip.clientWidth || 360, boxW = 24;
+  const n = items.length;
+  const W = strip.clientWidth || 800, boxW = 24;
   const avail = Math.max(50, W - boxW);
-  const scale = avail / maxGap;                                   // px per metre (scale-to-fit)
-  const minSpace = Math.min(boxW + 2, avail / Math.max(1, items.length));  // keep bunched cars readable
+  // Reserve i*minSpace for the boxes before each one and scale the proportional
+  // part into what's left. Guarantees: boxes never overlap (>= minSpace apart)
+  // AND never exceed the strip (last box lands exactly at the right edge) — even
+  // when the leader is far ahead and the rest are bunched.
+  const minSpace = Math.min(boxW + 4, avail / n);
+  const usable = Math.max(1, avail - (n - 1) * minSpace);
 
   strip.innerHTML = "";
-  let prevX = -1e9;
-  for (const o of items) {
-    let x = o.gap * scale;
-    if (x - prevX < minSpace) x = prevX + minSpace;
-    prevX = x;
+  for (let i = 0; i < n; i++) {
+    const o = items[i];
+    const x = (o.gap / maxGap) * usable + i * minSpace;
     const sel = o.c.car === selectedCar;
     const d = document.createElement("div");
     d.className = "gapbox" + (sel ? " sel" : "") + (o.c.am_active ? " am" : "");
