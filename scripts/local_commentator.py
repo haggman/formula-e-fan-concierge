@@ -222,6 +222,14 @@ async def amain(args: argparse.Namespace) -> None:
             if await deliver("recap", prompt, now_s, lap_now,
                              f"end of lap {completed_lap}"):
                 last_summary_lap = completed_lap
+        elif args.idle_filler and wall_since_fire >= args.idle_filler:
+            # quiet stretch — keep a continuous, radio-like flow
+            prompt = build_lap_summary_prompt(
+                lap_number=lap_now or 0,
+                snapshot_json=json.dumps(snapshot_dict(state, selected_car)),
+                watching=watching,
+            )
+            await deliver("update", prompt, now_s, lap_now, "field update")
         elif best and best.score >= args.threshold and not best.must_say:
             suppressed += 1
             if args.verbose:
@@ -242,12 +250,15 @@ def main():
                         help="simulate the fan watching this car number (field-wide if omitted)")
     parser.add_argument("--poll", type=int, default=2)
     parser.add_argument("--threshold", type=int, default=DEFAULT_THRESHOLD)
-    parser.add_argument("--debounce", type=int, default=15,
+    parser.add_argument("--debounce", type=int, default=8,
                         help="min wall seconds between normal calls")
     parser.add_argument("--must-say-gap", type=int, default=5,
                         help="min wall seconds before a must-say or overdue recap")
-    parser.add_argument("--summary-every", type=int, default=2,
+    parser.add_argument("--summary-every", type=int, default=1,
                         help="guarantee a field recap at least every N laps")
+    parser.add_argument("--idle-filler", type=int, default=12,
+                        help="if nothing fired in this many wall seconds, drop in a "
+                             "field update for continuous flow (0 disables)")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
     try:

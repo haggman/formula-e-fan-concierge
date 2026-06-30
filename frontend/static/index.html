@@ -464,7 +464,11 @@ function connect() {
   ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.onopen = () => {
     $("conn").textContent = "● live"; $("conn").className = "conn ok"; retry = 1000;
-    if (selectedCar != null) sendSelection();   // re-sync selection after a reconnect
+    // ALWAYS sync the server to THIS client's selection — including null. The
+    // commentator loop holds one selection for the whole process and it
+    // survives client disconnects, so a fresh page must actively reset it to
+    // field-wide, or commentary stays stuck on whatever a previous tab picked.
+    sendSelection();
   };
   ws.onmessage = e => {
     const msg = JSON.parse(e.data);

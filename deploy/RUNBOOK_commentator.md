@@ -152,9 +152,16 @@ travels the websocket to the loop and back.
 - **Pace it for a busy stretch:** to demo a dramatic moment, `/jump` to a lap and
   let it **play forward** (don't pause) so events flow from there; a frozen race
   produces no triggers.
-- **Tuning levers** (from the first live run — see `spec/frame_tools_scorer_reaim.md`
-  §5): the persona now narrates from the snapshot and avoids tool calls to stay
-  fast; it speaks in positions, not seconds or "on his gearbox" closeness. If the
-  `--select` feed feels too chatty, raise `SELECTED_CAR_MUST_SAY_MIN` in
-  `shared/scorer.py`; `--threshold` / `--debounce` / `--must-say-gap` trade
-  coverage for calm. Ctrl-C now exits cleanly (no traceback).
+- **Tuning levers** (from the live runs — see `spec/frame_tools_scorer_reaim.md`
+  §5): the persona narrates from the snapshot and avoids tool calls to stay fast;
+  it speaks in positions, not seconds or "on his gearbox" closeness. **Cadence**
+  for a continuous radio feel: the loop debounces at 8s, recaps every lap, and
+  drops a short "field update" if nothing has fired for `idle_filler_s` (12s);
+  raise `idle_filler_s`/`debounce_s` (CommentatorLoop) for calm, lower for chatter
+  (`--debounce` / `--idle-filler` on the harness). If the `--select` feed feels
+  too chatty, raise `SELECTED_CAR_MUST_SAY_MIN` in `shared/scorer.py`.
+- **Selection is server-global.** The `CommentatorLoop` holds ONE selection for
+  the whole process and it outlives a browser tab. The page re-syncs it on every
+  websocket connect (including clearing to field-wide), so a fresh load resets it.
+  If commentary ever seems stuck on one car, reload the page (or click that car
+  then "× field-wide"). Ctrl-C on the harness exits cleanly (no traceback).

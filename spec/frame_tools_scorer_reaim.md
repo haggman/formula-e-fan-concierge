@@ -182,3 +182,22 @@ so raising that constant calms a too-chatty "my car" feed. `DEFAULT_THRESHOLD`,
 One thing to spot-check on any run: a "safety car" mention is only honest if the
 snapshot's `race_phase` was actually `safety_car` — it's grounded by the prompt,
 but worth confirming on a busy replay.
+
+### Second live run — UI findings (2026-06-29, the #7 companion page)
+
+Running the page surfaced two things, both fixed:
+
+1. **Selection desync ("everything is car 94").** Field-wide commentary fixated on
+   one car, with calls wrongly tagged must-say. Cause: `CommentatorLoop` holds ONE
+   `_selected_car` for the whole server process, and it outlives a client. A car
+   selected in an earlier tab/run stayed boosted; a fresh page showed "field-wide"
+   but never told the server to clear (the reconnect only re-sent a *non-null*
+   selection). Fix: the page now calls `sendSelection()` on every websocket open,
+   including the cleared (null) state, so a fresh load resets the loop to
+   field-wide. (Selection is single-fan/global by design; last client wins.)
+2. **Too quiet for a broadcast.** Once the stuck must-say was gone, the 15s debounce
+   left long silences. Opened the cadence in `CommentatorLoop` (and the harness):
+   `debounce_s` 15→8, `summary_every` 2→1 (recap every lap), and a new
+   `idle_filler_s` (12s) that drops a short "field update" (`kind:"update"`) when
+   nothing significant has fired for a while — a continuous, radio-like flow
+   without lowering the significance bar.

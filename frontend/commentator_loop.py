@@ -62,9 +62,10 @@ class CommentatorLoop:
         broadcast: Broadcast,
         *,
         threshold: int = DEFAULT_THRESHOLD,
-        debounce_s: float = 15.0,
+        debounce_s: float = 8.0,
         must_say_gap_s: float = 5.0,
-        summary_every: int = 2,
+        summary_every: int = 1,
+        idle_filler_s: float = 12.0,
         poll_s: float = 2.0,
         agent_client=None,
         state_client=None,
@@ -74,6 +75,10 @@ class CommentatorLoop:
         self.debounce_s = debounce_s
         self.must_say_gap_s = must_say_gap_s
         self.summary_every = summary_every
+        # If nothing has fired for this long (wall seconds), drop in a short
+        # field update so the broadcast keeps a continuous, radio-like flow
+        # through the quiet stretches. 0 disables it.
+        self.idle_filler_s = idle_filler_s
         self.poll_s = poll_s
         # Injectable for tests/harnesses; default to the real Firestore reader
         # and the env-selected (local/engine) ADK agent client.
@@ -281,6 +286,16 @@ class CommentatorLoop:
                                             f"end of lap {completed_lap}")
                 if fired:
                     last_summary_lap = completed_lap
+            elif self.idle_filler_s and wall_gap >= self.idle_filler_s:
+                # Quiet stretch — nothing significant for a while. Keep the
+                # broadcast flowing with a short field update (radio-like).
+                attempted = True
+                prompt = build_lap_summary_prompt(
+                    lap_number=lap_now or 0,
+                    snapshot_json=json.dumps(snapshot_dict(state, self._selected_car)),
+                    watching=watching,
+                )
+                fired = await self._deliver("update", prompt, now_s, lap_now, "field update")
             elif best and best.score >= self.threshold:
                 self.stats["suppressed"] += 1
 
