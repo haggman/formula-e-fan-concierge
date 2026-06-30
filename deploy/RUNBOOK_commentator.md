@@ -135,14 +135,27 @@ What proves #7 works: clicking a car changes BOTH the panel (its live stats) and
 the *content* of the next commentary calls (they follow that car) — selection
 travels the websocket to the loop and back.
 
+### Track map (built — needs the outline file)
+
+The page renders a live **track map** in the upper-left: the Tempelhof outline with a
+dot per car, click a dot to follow it. It needs the GPS-derived outline file:
+
+```bash
+# 1. generate it (Colab): run notebooks/track_map_outline.ipynb -> writes track_outline.json
+# 2. stage it for the frontend:
+cp track_outline.json frontend/static/track_outline.json   # (or upload it there)
+```
+
+The page fetches `/track_outline.json` on load, draws the circuit, and plots each car
+via the saved projection transform (so dots sit on the track). Until the file is
+staged the map shows a "run the notebook" hint — the rest of the page works regardless.
+
 ### Still open
 
 - **CX concierge chat widget** — the ask-anything bot (#5) is built but not yet
   embedded on the page. There's a marked placeholder in `index.html` (search
   "CX CONCIERGE CHAT WIDGET") for the CX/Dialogflow Messenger snippet — the
   natural "add the chatbot" bonus.
-- **Track map** — plotting cars on the Tempelhof circuit from GPS is the next
-  visual pass (deferred by choice; the list + panel + feed are the working core).
 - **`setup/8_deploy_cloud.sh`** rename / Cloud Run deploy of the frontend is
   #8/deploy; this section runs it locally via uvicorn.
 
