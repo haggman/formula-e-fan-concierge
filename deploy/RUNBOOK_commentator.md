@@ -100,20 +100,44 @@ Switch `--select` between runs to feel the narrowing. In the product the UI send
 this over the websocket (`{type:"select", car_number}`) and the loop's
 `set_selection()` swaps it live mid-race.
 
-## 4. In the frontend service (when #7 wires the UI)
+## 4. Run the fan companion UI (#7 — the page)
 
-The loop is `frontend/commentator_loop.py` (`CommentatorLoop`). It's a drop-in for
-Ch2's `EngineerLoop` with two wiring points for the frontend team (#7):
-- on a `{type:"select", car_number}` websocket message → `loop.set_selection(n)`
-  (or `set_selection(None)` to clear);
-- deliveries broadcast as `{type:"radio", kind, text, selected_car, ...}` — the
-  same envelope Ch2 used, plus `selected_car`.
+`frontend/` now serves the **Race-Day Companion** page wired to the commentator:
+a clickable car list, a selected-car live stats panel, and the spoken commentary
+feed. `frontend/main.py` runs `CommentatorLoop`; the websocket carries state +
+`{type:"radio"}` deliveries out and the fan's `{type:"select", car_number}` in.
 
-`frontend/main.py` still imports Ch2's `EngineerLoop` / `OUR_CAR_NUMBER` /
-`tools.state_client` — that swap (to `CommentatorLoop`, drop `OUR_CAR_NUMBER`, read
-`shared.state_client`) and the `setup/8` deploy rename are #7/#8 work, intentionally
-not done here. The commentator package, loop, scorer, tools, and harness are
-complete and proven; the frontend rewire consumes them.
+```bash
+# Cloud Shell, repo root, sim playing (see §1.5), AGENT_PACKAGE=solution.commentator:
+export SIM_URL="$(gcloud run services describe fe-simulator --region "$REGION" --format='value(status.url)')"
+source activate.sh
+uvicorn frontend.main:app --host 0.0.0.0 --port 8080
+```
+
+Open it with **Cloud Shell → Web Preview on port 8080**. Then:
+- The car list (left) updates live. **Click a car** → it highlights, the stats
+  panel shows that car's position / lap / speed / energy / Attack Mode, and the
+  commentary **narrows onto it** (the calls now open on that car; each is tagged
+  `▸ #N`). Click it again, or hit **× field-wide**, to go back to whole-field.
+- Click **🔊 LIVE AUDIO** (top right) to hear the commentary spoken (TTS) — the
+  click is the browser gesture that unlocks autoplay.
+- The **SIM** bar restarts / pauses / sets speed without leaving the page; the
+  ask box (and hold-Space push-to-talk) puts a question to the commentator.
+
+What proves #7 works: clicking a car changes BOTH the panel (its live stats) and
+the *content* of the next commentary calls (they follow that car) — selection
+travels the websocket to the loop and back.
+
+### Still open
+
+- **CX concierge chat widget** — the ask-anything bot (#5) is built but not yet
+  embedded on the page. There's a marked placeholder in `index.html` (search
+  "CX CONCIERGE CHAT WIDGET") for the CX/Dialogflow Messenger snippet — the
+  natural "add the chatbot" bonus.
+- **Track map** — plotting cars on the Tempelhof circuit from GPS is the next
+  visual pass (deferred by choice; the list + panel + feed are the working core).
+- **`setup/8_deploy_cloud.sh`** rename / Cloud Run deploy of the frontend is
+  #8/deploy; this section runs it locally via uvicorn.
 
 ## Notes
 

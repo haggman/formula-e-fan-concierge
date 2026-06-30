@@ -1,14 +1,15 @@
-"""Race Engineer frontend service (chunk 9; packaging P1.2 routes the agent
-package through the AGENT_PACKAGE seam).
+"""Race-Day Companion frontend service.
 
-Pass 2: FastAPI + websocket streaming live race state AND the engineer's
-proactive radio calls (frontend/engineer_loop.py — the chunk 8 trigger
-policy as a background task). Pass 3 adds Q&A over the same socket.
+FastAPI + websocket: streams live field-wide race state to the fan UI AND the
+commentator's proactive broadcast calls (frontend/commentator_loop.py — the
+trigger policy as a background task, spoken via TTS). The same socket carries the
+fan's car SELECTION inbound ({type:"select", car_number}) → the commentator loop
+narrows commentary onto that car. Q&A to the commentator rides the socket too.
 
-Packaging P1.2: OUR_CAR_NUMBER and get_state_client resolve through
-agent_module() so the WHOLE frontend (this poller and the engineer loop)
-shares one state_client module — and therefore one Firestore-client
-singleton — from whichever package AGENT_PACKAGE selects.
+Re-aimed from Ch2's pit-wall service: dropped the "our car #13" framing
+(OUR_CAR_NUMBER) and the AGENT_PACKAGE-resolved tools.state_client; state now
+comes from the vendored shared.state_client, and the agent is the commentator.
+The CX concierge chat widget (ask-anything bot) is a follow-on embed (#5/#7).
 
 Run locally (Cloud Shell, Web Preview on 8080):
     uvicorn frontend.main:app --host 0.0.0.0 --port 8080
@@ -27,18 +28,20 @@ import httpx
 from fastapi import Body, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 
-from frontend.agent_client import agent_module
-from frontend.engineer_loop import EngineerLoop
+from frontend.commentator_loop import CommentatorLoop
 from frontend.stt import transcribe
 from frontend.tts import synthesize
 from shared.models import RaceState
+from shared.state_client import get_state_client
 
-# --- resolved through the AGENT_PACKAGE seam (starter vs solution) ---
-OUR_CAR_NUMBER = agent_module("config").OUR_CAR_NUMBER
-get_state_client = agent_module("tools.state_client").get_state_client
+# The commentator is field-wide — no single "our car". The fan's SELECTED car
+# arrives over the websocket ({type:"select"}) and is held in the loop. State is
+# read from the vendored shared.state_client (the commentator package has no
+# per-package state_client). (Re-aimed from Ch2, where this resolved
+# OUR_CAR_NUMBER + tools.state_client through the AGENT_PACKAGE seam.)
 
 # Uvicorn configures only ITS OWN loggers. Without this, every INFO line
-# from the engineer loop — radio calls, restart notices, the scoreboard —
+# from the commentator loop — radio calls, restart notices, the scoreboard —
 # is silently dropped by Python's WARNING-level lastResort handler.
 # Found the hard way: the scoreboard shipped and nobody could hear it.
 logging.basicConfig(
@@ -102,12 +105,12 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
-engineer: EngineerLoop | None = None        # set in lifespan
+commentator: CommentatorLoop | None = None  # set in lifespan
 latest = {"race_time_s": 0, "lap": None}    # for stamping Q&A log entries
 
 
 async def radio_broadcast(message: dict) -> None:
-    """Broadcast wrapper that gives the engineer a voice: synthesizes audio
+    """Broadcast wrapper that gives the commentator a voice: synthesizes audio
     for every spoken radio kind before fan-out. Questions stay silent; a
     synthesis failure degrades to text-only."""
     if message.get("type") == "radio" and message.get("kind") != "question":
@@ -123,7 +126,9 @@ async def radio_broadcast(message: dict) -> None:
 
 
 def ui_state(state: RaceState) -> dict:
-    """Full-field payload for the position tower + our-car panel."""
+    """Field-wide payload: the full car list, each with enough live detail for the
+    selected-car stats panel. No "our car" — the fan picks one in the UI.
+    """
     cars = []
     for c in sorted(state.cars, key=lambda c: (c.is_retired, c.position)):
         cars.append({
@@ -131,26 +136,20 @@ def ui_state(state: RaceState) -> dict:
             "driver": c.driver_short_name,
             "position": c.position,
             "lap": c.current_lap,
+            "speed_kmh": round(c.speed_kmh, 0),
+            "energy_pct": round(c.energy.pct_remaining, 1),
             "am_active": c.attack_mode.active,
             "am_used": c.attack_mode.activations_used,
+            "am_budget_s": round(c.attack_mode.remaining_budget_s, 0),
+            "am_scenario": c.attack_mode.scenario,
             "retired": c.is_retired,
-            "us": c.car_number == OUR_CAR_NUMBER,
         })
-    our = state.car_by_number(OUR_CAR_NUMBER)
     return {
         "type": "state",
         "race_time_s": state.race_time_s,
         "race_phase": state.race_phase.value,
+        "leader_lap": state.current_leader_lap,
         "cars": cars,
-        "our": None if our is None else {
-            "position": our.position,
-            "lap": our.current_lap,
-            "energy_pct": round(our.energy.pct_remaining, 1),
-            "am_active": our.attack_mode.active,
-            "am_used": our.attack_mode.activations_used,
-            "am_budget_s": our.attack_mode.remaining_budget_s,
-            "am_scenario": our.attack_mode.scenario,
-        },
     }
 
 
@@ -167,7 +166,7 @@ async def state_poller() -> None:
             if state is not None:
                 payload = ui_state(state)
                 latest["race_time_s"] = payload["race_time_s"]
-                latest["lap"] = payload["our"]["lap"] if payload["our"] else None
+                latest["lap"] = payload["leader_lap"]
                 await manager.broadcast(payload)
         except Exception:
             logger.exception("state poll failed")
@@ -181,19 +180,19 @@ async def state_poller() -> None:
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
-    global engineer
+    global commentator
     poller = asyncio.create_task(state_poller())
-    engineer = EngineerLoop(radio_broadcast)
-    engineer_task = asyncio.create_task(engineer.run())
+    commentator = CommentatorLoop(radio_broadcast)
+    commentator_task = asyncio.create_task(commentator.run())
     yield
-    for task in (poller, engineer_task):
+    for task in (poller, commentator_task):
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
-    await engineer.close()
+    await commentator.close()
 
 
-app = FastAPI(title="Race Engineer", lifespan=lifespan)
+app = FastAPI(title="Race-Day Companion", lifespan=lifespan)
 
 
 @app.get("/")
@@ -205,7 +204,7 @@ async def _handle_ask(question: str) -> None:
     stamp = {"race_time_s": latest["race_time_s"], "lap": latest["lap"]}
     t0 = time.monotonic()
     try:
-        answer = await engineer.ask(question)
+        answer = await commentator.ask(question)
         await radio_broadcast({"type": "radio", "kind": "qa",
                                "text": answer,
                                "secs": round(time.monotonic() - t0, 1),
@@ -227,8 +226,18 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 data = json.loads(raw)
             except json.JSONDecodeError:
                 continue
+            msg_type = data.get("type")
+
+            # The fan clicked a car (or cleared the selection). Thread it into
+            # the commentator loop so commentary narrows onto that car; null /
+            # missing car_number = back to pure field-wide.
+            if msg_type == "select" and commentator:
+                car = data.get("car_number")
+                commentator.set_selection(int(car) if car is not None else None)
+                continue
+
             question = (data.get("question") or "").strip()
-            if data.get("type") == "ask" and question and engineer:
+            if msg_type == "ask" and question and commentator:
                 await manager.broadcast({
                     "type": "radio", "kind": "question", "text": question,
                     "race_time_s": latest["race_time_s"], "lap": latest["lap"],

@@ -51,7 +51,7 @@ The canonical architecture for Challenge 1. Supersedes the ASCII sketch in
 | Trigger/scorer pattern | **Re-aimed ✅ built**: field-wide + selected-car boost | `shared/scorer.py` + `spec/frame_tools_scorer_reaim.md` §5 |
 | Frame tools | **Re-aimed ✅ built**: `get_field_state(selected_car)` + focus block | `*/commentator/tools/frame_tools.py` |
 | Commentator loop | **New ✅ built**: selection-aware fork of engineer_loop | `frontend/commentator_loop.py` |
-| Fan UI | **Given**, reworked for map + selection + stats + CX widget (#7) | `frontend/` |
+| Fan UI | **Reworked ✅ (companion page)**: field-wide list + click-to-select + selected-car stats panel + spoken commentary feed; selection over websocket. Map + CX widget embed = follow-ons | `frontend/main.py`, `frontend/static/index.html` |
 | Commentator agent | **New ✅ built** (ADK), forked from race engineer; verified offline, live runbook ready | `*/commentator/` + `deploy/RUNBOOK_commentator.md` |
 | Race-data subagent | **New** (ADK), owns now+then, deployed to **Cloud Run** (CX OpenAPI tool) | `*/race_data_subagent/` |
 | CX concierge | **New** (CX low-code), MCP + RAG + Search | `*/cx_concierge/` |
@@ -97,9 +97,16 @@ pieces it owns; the rest stay for #7/#8.
   `scripts/local_commentator.py` (live harness) and `scripts/verify_commentator_offline.py`
   (no-GCP check).
 
-**Still to rewire (#7 frontend / #8 deploy):** `frontend/main.py` (swap `EngineerLoop` →
-`CommentatorLoop`, drop `OUR_CAR_NUMBER`, read `shared.state_client`, add the `{type:"select"}`
-handler), `frontend/agent_client.py` `APP_NAME` cosmetic, `setup/8_deploy_cloud.sh` rename,
-`deploy/build_engine_app.py` / `deploy/deploy_frontend.sh`, and the leftover Ch2 scripts
-(`local_test.py`, `agent_chat.py`, `stage_probe.py`) which still name `race_engineer`.
-`frontend/engineer_loop.py` is superseded by `commentator_loop.py` and can be deleted in #7.
+**Done in the #7 frontend pass:** `frontend/main.py` rewired — `EngineerLoop` →
+`CommentatorLoop`, `OUR_CAR_NUMBER` dropped, reads `shared.state_client`, field-wide
+`ui_state`, and the inbound `{type:"select"}` handler → `set_selection()`.
+`frontend/static/index.html` reworked into the companion page (click-to-select list +
+selected-car stats panel + spoken commentary feed). `frontend/engineer_loop.py` is now
+superseded by `commentator_loop.py` and can be deleted.
+
+**Still to rewire (follow-ons / #8 deploy):** the CX chat-widget embed (placeholder marked in
+`index.html`) and the track map are the #7 follow-on passes; `frontend/agent_client.py` `APP_NAME`
+is cosmetic; `setup/8_deploy_cloud.sh` rename + `deploy/build_engine_app.py` /
+`deploy/deploy_frontend.sh` are #8 (Cloud Run deploy — runs locally via uvicorn today); the
+leftover Ch2 dev scripts (`local_test.py`, `agent_chat.py`, `stage_probe.py`) still name
+`race_engineer` and are superseded by `scripts/local_commentator.py`.

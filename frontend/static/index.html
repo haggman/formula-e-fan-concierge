@@ -2,14 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Race Engineer — Car 13</title>
+<title>Race-Day Companion — Berlin 2024</title>
 <style>
   :root {
     --bg: #0d1117; --panel: #161b22; --line: #30363d;
     --text: #e6edf3; --dim: #8b949e;
-    --accent: #58a6ff; --us: #1f6feb33;
+    --accent: #58a6ff; --sel: #1f6feb33;
     --am: #f0883e; --ok: #3fb950; --warn: #d29922; --bad: #f85149;
-    --lap-a: #58a6ff; --lap-b: #d2a8ff;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -33,18 +32,22 @@
   #audio-toggle.live { border-color: var(--ok); color: var(--ok); }
   header .conn.ok { color: var(--ok); } header .conn.down { color: var(--bad); }
 
-  main { flex: 1; display: grid; grid-template-columns: 300px 1fr; min-height: 0; }
+  main { flex: 1; display: grid; grid-template-columns: 320px 1fr; min-height: 0; }
 
-  /* Position tower */
+  /* Car list (click to follow) */
   #tower { border-right: 1px solid var(--line); overflow-y: auto; padding: 8px 0; }
+  #tower .listhint {
+    font-size: 11px; color: var(--dim); padding: 2px 14px 8px; letter-spacing: .5px;
+  }
   .row {
     display: flex; align-items: center; gap: 8px;
-    padding: 3px 12px; border-left: 3px solid transparent;
+    padding: 4px 12px; border-left: 3px solid transparent; cursor: pointer;
   }
-  .row.us { background: var(--us); border-left-color: var(--accent); }
-  .row.retired { opacity: 0.35; text-decoration: line-through; }
+  .row:hover { background: #ffffff0a; }
+  .row.selected { background: var(--sel); border-left-color: var(--accent); }
+  .row.retired { opacity: 0.35; text-decoration: line-through; cursor: default; }
   .row .pos { width: 30px; color: var(--dim); text-align: right; }
-  .row.us .pos { color: var(--accent); font-weight: 700; }
+  .row.selected .pos { color: var(--accent); font-weight: 700; }
   .row .num { width: 34px; color: var(--dim); }
   .row .drv { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .row .ambadge {
@@ -56,39 +59,46 @@
 
   /* Right column */
   #right { display: flex; flex-direction: column; min-height: 0; }
-  #ourpanel {
-    display: flex; align-items: center; justify-content: space-around;
-    gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line);
-  }
-  .cluster { text-align: center; }
-  .cluster .label { font-size: 11px; color: var(--dim); text-transform: uppercase; margin-top: 4px; }
-  .bigstat { font-size: 34px; font-weight: 700; line-height: 1.1; }
-  .delta { font-size: 13px; font-weight: 600; visibility: hidden; }
-  .delta.up { visibility: visible; color: var(--ok); }
-  .delta.down { visibility: visible; color: var(--bad); }
-  #amstat .bigstat { font-size: 20px; padding-top: 8px; }
-  #regen {
-    font-size: 11px; font-weight: 700; color: var(--ok);
-    letter-spacing: 1px; visibility: hidden; margin-top: -6px;
-  }
-  #regen.on { visibility: visible; }
-  #amstat.amon .bigstat { color: var(--am); }
-  svg text { fill: var(--text); font-family: inherit; }
-  .gauge-track, .ring-track { stroke: var(--line); fill: none; }
-  .gauge-arc, .ring-arc { fill: none; stroke-linecap: round; }
-  .gauge-arc { transition: stroke-dashoffset .6s, stroke .6s; }
-  .ring-arc { transition: stroke-dashoffset .6s; }
-  .needle { stroke: var(--text); stroke-width: 2; }
 
-  /* Radio log */
-  #radiolog { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
-  .call { max-width: 720px; }
+  /* Selected-car (or field-wide) panel */
+  #following {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 16px; border-bottom: 1px solid var(--line); font-size: 12px;
+  }
+  #following .who { font-weight: 700; color: var(--accent); }
+  #following.fieldwide .who { color: var(--text); }
+  #clear-sel {
+    margin-left: auto; background: var(--panel); border: 1px solid var(--line);
+    color: var(--dim); font: inherit; font-size: 11px; padding: 2px 10px;
+    border-radius: 4px; cursor: pointer; visibility: hidden;
+  }
+  #following.selected #clear-sel { visibility: visible; }
+
+  #selpanel {
+    display: flex; align-items: center; justify-content: space-around;
+    gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); min-height: 96px;
+  }
+  #selpanel.empty { color: var(--dim); font-style: italic; justify-content: center; }
+  .cluster { text-align: center; min-width: 70px; }
+  .cluster .label { font-size: 11px; color: var(--dim); text-transform: uppercase; margin-top: 4px; }
+  .bigstat { font-size: 30px; font-weight: 700; line-height: 1.1; }
+  .bigstat .unit { font-size: 13px; color: var(--dim); font-weight: 400; }
+  #c-am .bigstat.amon { color: var(--am); }
+  /* energy bar */
+  .ebar { width: 110px; height: 10px; background: var(--line); border-radius: 5px; overflow: hidden; margin: 6px auto 0; }
+  .ebar > div { height: 100%; width: 0; background: var(--ok); transition: width .5s, background .5s; }
+
+  /* Commentary feed */
+  #feed-label { font-size: 11px; color: var(--dim); letter-spacing: 2px; padding: 8px 16px 0; }
+  #radiolog { flex: 1; overflow-y: auto; padding: 8px 16px 12px; display: flex; flex-direction: column; gap: 8px; }
+  .call { max-width: 760px; }
   .call .meta { font-size: 11px; color: var(--dim); margin-bottom: 2px; }
-  .call .meta .tag { color: var(--am); }
+  .call .meta .tag { color: var(--am); text-transform: uppercase; }
+  .call .meta .foc { color: var(--accent); }
   .call .text { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; }
   .call.qa .text { border-color: var(--accent); }
   .call.question { align-self: flex-end; }
-  .call.question .text { border-color: var(--accent); background: var(--us); }
+  .call.question .text { border-color: var(--accent); background: var(--sel); }
   .call.question .meta { text-align: right; }
   #pending { color: var(--dim); font-style: italic; display: none; }
   #placeholder { color: var(--dim); font-style: italic; }
@@ -109,7 +119,7 @@
   #mic.rec { background: var(--bad); border-color: var(--bad); color: #fff; }
   #mic.busy { opacity: 0.5; }
 
-  /* Pit-wall systems bar */
+  /* Simulator systems bar (demo control) */
   #simbar {
     display: flex; align-items: center; gap: 10px;
     padding: 6px 16px; border-top: 1px solid var(--line);
@@ -127,52 +137,36 @@
 </head>
 <body>
 <header>
-  <h1>RACE ENGINEER — CAR 13 · DA COSTA</h1>
+  <h1>RACE-DAY COMPANION · BERLIN 2024</h1>
   <span class="phase" id="phase">—</span>
   <span class="clock" id="clock">t=—</span>
   <button id="audio-toggle" class="muted">🔇 MUTED</button>
   <span class="conn down" id="conn">● connecting</span>
 </header>
 <main>
-  <div id="tower"></div>
+  <div id="tower"><div class="listhint">Click a car to follow it</div></div>
   <div id="right">
-    <div id="ourpanel">
-      <div class="cluster">
-        <div class="bigstat"><span id="s-pos">—</span> <span class="delta" id="s-delta"></span></div>
-        <div class="label">Position</div>
-      </div>
-      <div class="cluster">
-        <svg width="90" height="90" viewBox="0 0 90 90">
-          <circle class="ring-track" id="lapring-bg" cx="45" cy="45" r="36" stroke-width="6"/>
-          <circle class="ring-arc" id="lapring" cx="45" cy="45" r="36" stroke-width="6"
-                  stroke="var(--accent)" stroke-dasharray="226.2" stroke-dashoffset="226.2"
-                  transform="rotate(-90 45 45)"/>
-          <text id="s-lap" x="45" y="50" text-anchor="middle" font-size="24" font-weight="700">—</text>
-        </svg>
-        <div class="label">Lap</div>
-      </div>
-      <div class="cluster">
-        <svg width="200" height="115" viewBox="0 0 200 115">
-          <path class="gauge-track" d="M 20 100 A 80 80 0 0 1 180 100" stroke-width="10"/>
-          <path class="gauge-arc" id="energyarc" d="M 20 100 A 80 80 0 0 1 180 100"
-                stroke-width="10" stroke="var(--ok)"
-                stroke-dasharray="251.3" stroke-dashoffset="251.3"/>
-          <line class="needle" id="needle" x1="100" y1="100" x2="100" y2="34"
-                transform="rotate(-90 100 100)"/>
-          <circle cx="100" cy="100" r="5" fill="var(--text)"/>
-          <text id="s-energy" x="100" y="92" text-anchor="middle" font-size="20" font-weight="700">—</text>
-        </svg>
-        <div id="regen">▲ REGEN</div>
-        <div class="label">Energy %</div>
-      </div>
-      <div class="cluster" id="amstat">
-        <div class="bigstat" id="s-am">—</div>
-        <div class="label">Attack Mode</div>
-      </div>
+    <div id="following" class="fieldwide">
+      <span class="who" id="follow-who">Following the whole field</span>
+      <button id="clear-sel" title="Stop following — back to the whole field">× field-wide</button>
     </div>
-    <div id="radiolog"><div id="placeholder">Radio silence — waiting for the engineer…</div><div id="pending">engineer is checking…</div></div>
+    <div id="selpanel" class="empty">Click a car on the left to see its live stats and have the commentary follow it.</div>
+
+    <!--
+      CX CONCIERGE CHAT WIDGET — follow-on / bonus (#5 + #7).
+      The ask-anything concierge bot (work item #5) embeds here. Drop the CX /
+      Dialogflow Messenger snippet for the deployed agent in this spot (it ships
+      as a df-messenger custom element plus its loader). Left out of this pass
+      on purpose; this is the natural "add the chatbot" exercise.
+    -->
+
+    <div id="feed-label">LIVE COMMENTARY</div>
+    <div id="radiolog">
+      <div id="placeholder">Waiting for the commentator…</div>
+      <div id="pending">commentator is checking…</div>
+    </div>
     <div id="askbar">
-      <input id="question" placeholder="Ask your engineer… (or hold SPACE to talk)">
+      <input id="question" placeholder="Ask the commentator about the race… (or hold SPACE to talk)">
       <button id="mic" title="Hold to talk (or hold Space outside the text box)">🎤</button>
       <button id="ask">ASK</button>
     </div>
@@ -193,132 +187,113 @@
 </main>
 <script>
 const $ = id => document.getElementById(id);
-// Driver surname map — GENERATED from fe_race10.drivers (pre_push_patch.py).
-// The frozen 2024 entry list; surnames match what the radio voice says.
+// Driver surname map — the frozen 2024 Berlin entry list. Surnames match what
+// the commentary voice says.
 const DRIVERS = {
-  "DEN": { last: "Dennis", full: "Jake Dennis" },
-  "VAN": { last: "Vandoorne", full: "Stoffel Vandoorne" },
-  "SET": { last: "Sette C\u00e2mara", full: "S\u00e9rgio Sette C\u00e2mara" },
-  "ERI": { last: "Eriksson", full: "Joel Eriksson" },
-  "HUG": { last: "Hughes", full: "Jake Hughes" },
-  "GUE": { last: "G\u00fcnther", full: "Maximilian G\u00fcnther" },
-  "BAR": { last: "Barnard", full: "Taylor Barnard" },
-  "EVA": { last: "Evans", full: "Mitch Evans" },
-  "DIG": { last: "Di Grassi", full: "Lucas Di Grassi" },
-  "DAC": { last: "Da Costa", full: "Ant\u00f3nio F\u00e9lix Da Costa" },
-  "ARO": { last: "Aron", full: "Paul Aron" },
-  "NAT": { last: "Nato", full: "Norman Nato" },
-  "DAR": { last: "Daruvala", full: "Jehan Daruvala" },
-  "KIN": { last: "King", full: "Jordan King" },
-  "ROW": { last: "Rowland", full: "Oliver Rowland" },
-  "FEN": { last: "Fenestraz", full: "Sacha Fenestraz" },
-  "JEV": { last: "Vergne", full: "Jean-\u00c9ric Vergne" },
-  "TIC": { last: "Ticktum", full: "Dan Ticktum" },
-  "CAS": { last: "Cassidy", full: "Nick Cassidy" },
-  "MOR": { last: "Mortara", full: "Edoardo Mortara" },
-  "VDL": { last: "Van Der Linde", full: "Kelvin Van Der Linde" },
-  "WEH": { last: "Wehrlein", full: "Pascal Wehrlein" },
+  "DEN": { last: "Dennis" }, "VAN": { last: "Vandoorne" }, "SET": { last: "Sette Câmara" },
+  "ERI": { last: "Eriksson" }, "HUG": { last: "Hughes" }, "GUE": { last: "Günther" },
+  "BAR": { last: "Barnard" }, "EVA": { last: "Evans" }, "DIG": { last: "Di Grassi" },
+  "DAC": { last: "Da Costa" }, "ARO": { last: "Aron" }, "NAT": { last: "Nato" },
+  "DAR": { last: "Daruvala" }, "KIN": { last: "King" }, "ROW": { last: "Rowland" },
+  "FEN": { last: "Fenestraz" }, "JEV": { last: "Vergne" }, "TIC": { last: "Ticktum" },
+  "CAS": { last: "Cassidy" }, "MOR": { last: "Mortara" }, "VDL": { last: "Van Der Linde" },
+  "WEH": { last: "Wehrlein" },
 };
-const GAUGE_LEN = 251.3;   // semicircle arc length (r=80)
-const RING_LEN = 226.2;    // lap ring circumference (r=36)
+const lastName = code => (DRIVERS[code] || {}).last || code || "—";
 
 function fmtClock(s) {
   const m = Math.floor(s / 60), ss = String(Math.floor(s % 60)).padStart(2, "0");
   return `t=${m}:${ss}`;
 }
 
-// Lap-progress + position-delta tracking (client-side; calibrates after
-// the first observed lap boundary)
-let lapSeen = null, lapStartT = null, lapDuration = null, posAtLapStart = null;
-let prevEnergy = null;
-let ringLap = null;  // lap the ring is currently painting
-const REGEN_THRESHOLD = 0.05;  // % rise per sample before we call it regen
-const DEFAULT_LAP_S = 66;      // Berlin green-flag lap, until the ring calibrates
+// ----------------------------------------------------------------------------
+// Selection — the fan clicks a car; the commentary narrows onto it.
+// selectedCar is the single source of truth on the client; the server holds its
+// own copy (set over the websocket) for the commentator loop's scoring.
+// ----------------------------------------------------------------------------
+let selectedCar = null;     // int | null
+let lastState = null;       // most recent {type:"state"} message, for re-render
+
+function sendSelection() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "select", car_number: selectedCar }));
+  }
+}
+
+function selectCar(carNum) {
+  selectedCar = (selectedCar === carNum) ? null : carNum;  // click again to clear
+  sendSelection();
+  if (lastState) renderState(lastState);
+}
+
+$("clear-sel").onclick = () => { selectedCar = null; sendSelection(); if (lastState) renderState(lastState); };
 
 function renderState(msg) {
+  lastState = msg;
   $("phase").textContent = msg.race_phase.replace(/_/g, " ");
   $("clock").textContent = fmtClock(msg.race_time_s);
 
+  // --- car list ---
   const tower = $("tower");
-  tower.innerHTML = "";
+  tower.innerHTML = '<div class="listhint">Click a car to follow it</div>';
   for (const c of msg.cars) {
     const row = document.createElement("div");
-    row.className = "row" + (c.us ? " us" : "") + (c.retired ? " retired" : "");
+    row.className = "row" + (c.car === selectedCar ? " selected" : "") + (c.retired ? " retired" : "");
     row.innerHTML =
       `<span class="pos">P${c.position}</span>` +
       `<span class="num">#${c.car}</span>` +
-      `<span class="drv">${(DRIVERS[c.driver] || {}).last || c.driver || "—"}</span>` +
+      `<span class="drv">${lastName(c.driver)}</span>` +
       `<span class="ambadge${c.am_active ? " on" : ""}">AM</span>` +
       `<span class="pips">${"●".repeat(c.am_used)}${"○".repeat(Math.max(0, 2 - c.am_used))}</span>`;
+    if (!c.retired) row.onclick = () => selectCar(c.car);
     tower.appendChild(row);
   }
 
-  const o = msg.our;
-  if (!o) return;
-
-  // --- lap boundary bookkeeping ---
-  if (lapSeen !== null && o.lap < lapSeen) {
-    // lap went BACKWARDS: the sim was restarted under us — flush all tracking
-    lapSeen = null; lapStartT = null; lapDuration = null;
-    posAtLapStart = null; prevEnergy = null;
+  // --- following banner + selected-car panel ---
+  const sel = selectedCar != null ? msg.cars.find(c => c.car === selectedCar) : null;
+  const followEl = $("following"), whoEl = $("follow-who");
+  if (selectedCar == null) {
+    followEl.className = "fieldwide";
+    whoEl.textContent = "Following the whole field";
+    renderPanelEmpty("Click a car on the left to see its live stats and have the commentary follow it.");
+  } else if (!sel) {
+    followEl.className = "selected";
+    whoEl.textContent = `Following #${selectedCar} — out / no data`;
+    renderPanelEmpty(`Car ${selectedCar} isn't in the running field right now.`);
+  } else {
+    followEl.className = "selected";
+    whoEl.textContent = `Following #${sel.car} · ${lastName(sel.driver)}`;
+    renderPanel(sel);
   }
-  if (lapSeen !== null && o.lap > lapSeen) {
-    if (lapStartT !== null) lapDuration = msg.race_time_s - lapStartT;
-    lapStartT = msg.race_time_s;
-    posAtLapStart = o.position;
-  } else if (lapSeen === null && o.lap >= 1 && msg.race_time_s >= 0) {
-    // start tracking at the green flag, not during the pre-race countdown —
-    // calibrating from t≈-10s made lap 1 fill early and sit
-    lapSeen = o.lap; lapStartT = msg.race_time_s; posAtLapStart = o.position;
-  }
-  if (lapSeen !== null) lapSeen = o.lap;
-
-  // position + delta vs lap start
-  $("s-pos").textContent = "P" + o.position;
-  const d = posAtLapStart !== null ? posAtLapStart - o.position : 0;
-  const deltaEl = $("s-delta");
-  deltaEl.className = "delta" + (d > 0 ? " up" : d < 0 ? " down" : "");
-  deltaEl.textContent = d > 0 ? `▲${d}` : d < 0 ? `▼${-d}` : "";
-
-  // lap ring — current lap's color sweeps over the previous lap's
-  $("s-lap").textContent = o.lap;
-  let progress = 0;
-  if (lapStartT !== null) {
-    progress = Math.max(0, Math.min(1,
-      (msg.race_time_s - lapStartT) / (lapDuration || DEFAULT_LAP_S)));
-  }
-  const lapColor = l => l % 2 ? "var(--lap-a)" : "var(--lap-b)";
-  const ring = $("lapring");
-  if (ringLap !== o.lap) {
-    // lap boundary: snap to empty in the new color with NO animation,
-    // so the new sweep starts from zero instead of visibly retracting
-    ring.style.transition = "none";
-    ring.style.stroke = lapColor(o.lap);
-    ring.style.strokeDashoffset = RING_LEN;
-    ring.getBoundingClientRect();  // force reflow before re-enabling
-    ring.style.transition = "";
-    ringLap = o.lap;
-  }
-  $("lapring-bg").style.stroke = o.lap > 1 && lapDuration ? lapColor(o.lap - 1) : "var(--line)";
-  ring.style.strokeDashoffset = RING_LEN * (1 - progress);
-
-  // energy gauge
-  const pct = Math.max(0, Math.min(100, o.energy_pct));
-  $("s-energy").textContent = pct.toFixed(1);
-  const color = pct > 40 ? "var(--ok)" : pct > 20 ? "var(--warn)" : "var(--bad)";
-  const arc = $("energyarc");
-  arc.style.strokeDashoffset = GAUGE_LEN * (1 - pct / 100);
-  arc.style.stroke = color;
-  $("needle").setAttribute("transform", `rotate(${-90 + 180 * pct / 100} 100 100)`);
-  $("regen").classList.toggle("on", prevEnergy !== null && pct - prevEnergy > REGEN_THRESHOLD);
-  prevEnergy = pct;
-
-  // attack mode
-  $("s-am").textContent = o.am_active ? "ACTIVE" : `${o.am_used}/2`;
-  $("amstat").classList.toggle("amon", o.am_active);
 }
 
-// --- radio audio: sequential playback queue (one mouth, one speaker) ---
+function renderPanelEmpty(text) {
+  const p = $("selpanel");
+  p.className = "empty";
+  p.textContent = text;
+}
+
+function renderPanel(c) {
+  const pct = Math.max(0, Math.min(100, c.energy_pct));
+  const ecolor = pct > 40 ? "var(--ok)" : pct > 20 ? "var(--warn)" : "var(--bad)";
+  const am = c.am_active
+    ? `<span class="bigstat amon">ON</span>`
+    : `<span class="bigstat">${c.am_used}/2</span>`;
+  const p = $("selpanel");
+  p.className = "";
+  p.innerHTML =
+    `<div class="cluster"><div class="bigstat">P${c.position}</div><div class="label">Position</div></div>` +
+    `<div class="cluster"><div class="bigstat">${c.lap}</div><div class="label">Lap</div></div>` +
+    `<div class="cluster"><div class="bigstat">${Math.round(c.speed_kmh)}<span class="unit"> km/h</span></div><div class="label">Speed</div></div>` +
+    `<div class="cluster">` +
+      `<div class="bigstat">${pct.toFixed(0)}<span class="unit"> %</span></div>` +
+      `<div class="ebar"><div style="width:${pct}%;background:${ecolor}"></div></div>` +
+      `<div class="label">Energy</div></div>` +
+    `<div class="cluster" id="c-am">${am}` +
+      `<div class="label">Attack Mode${c.am_active ? " · " + c.am_budget_s + "s" : ""}</div></div>`;
+}
+
+// --- commentary audio: sequential playback queue (one voice, one speaker) ---
 let audioEnabled = false;
 const audioQueue = [];
 let audioPlaying = false;
@@ -340,7 +315,7 @@ $("audio-toggle").onclick = () => {
   // the click itself is the user gesture that unlocks browser autoplay
 };
 
-function addRadioCall(msg) {
+function addCommentary(msg) {
   if (msg.audio && audioEnabled) { audioQueue.push(msg.audio); drainAudio(); }
   const ph = $("placeholder"); if (ph) ph.remove();
   const pending = $("pending");
@@ -349,12 +324,12 @@ function addRadioCall(msg) {
   const cls = msg.kind === "qa" ? " qa" : msg.kind === "question" ? " question" : "";
   div.className = "call" + cls;
   const who = msg.kind === "question" ? "YOU · " : "";
+  const isCall = msg.kind && msg.kind !== "qa" && msg.kind !== "question";
+  const foc = (msg.selected_car != null) ? ` · <span class="foc">▸ #${msg.selected_car}</span>` : "";
   div.innerHTML =
     `<div class="meta">${who}${fmtClock(msg.race_time_s)} · lap ${msg.lap}` +
-    (msg.kind && msg.kind !== "qa" && msg.kind !== "question"
-      ? ` · <span class="tag">${msg.kind}</span>` : "") +
+    (isCall ? ` · <span class="tag">${msg.kind}</span>${foc}` : "") +
     (msg.secs != null ? ` · ${msg.secs}s` : "") +
-    (msg.tools != null ? ` · ${msg.tools} tool${msg.tools === 1 ? "" : "s"}` : "") +
     `</div><div class="text">${msg.text}</div>`;
   const log = $("radiolog");
   log.insertBefore(div, pending);
@@ -372,7 +347,7 @@ function sendQuestion() {
 $("ask").onclick = sendQuestion;
 $("question").addEventListener("keydown", e => { if (e.key === "Enter") sendQuestion(); });
 
-// --- simulator controls ---
+// --- simulator controls (demo) ---
 async function simCall(action, payload) {
   const msg = $("sim-msg");
   try {
@@ -454,8 +429,8 @@ async function sendRecording() {
     if (!r.ok) throw new Error();
     const { transcript } = await r.json();
     if (transcript) {
-      $("question").value = transcript;        // let the audience see what was heard
-      setTimeout(sendQuestion, 600);           // then it goes to the engineer
+      $("question").value = transcript;
+      setTimeout(sendQuestion, 600);
     }
   } catch {
     $("question").placeholder = "Didn't catch that — try again or type";
@@ -471,7 +446,7 @@ for (const ev of ["mouseup", "mouseleave", "touchend"])
 
 document.addEventListener("keydown", e => {
   if (e.code === "Space" && !e.repeat && document.activeElement !== $("question")) {
-    e.preventDefault();  // don't scroll the page
+    e.preventDefault();
     pttStart();
   }
 });
@@ -482,15 +457,19 @@ document.addEventListener("keyup", e => {
   }
 });
 
+// --- websocket ---
 let ws, retry = 1000;
 function connect() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   ws = new WebSocket(`${proto}://${location.host}/ws`);
-  ws.onopen = () => { $("conn").textContent = "● live"; $("conn").className = "conn ok"; retry = 1000; };
+  ws.onopen = () => {
+    $("conn").textContent = "● live"; $("conn").className = "conn ok"; retry = 1000;
+    if (selectedCar != null) sendSelection();   // re-sync selection after a reconnect
+  };
   ws.onmessage = e => {
     const msg = JSON.parse(e.data);
     if (msg.type === "state") renderState(msg);
-    else if (msg.type === "radio") addRadioCall(msg);
+    else if (msg.type === "radio") addCommentary(msg);
   };
   ws.onclose = () => {
     $("conn").textContent = "● reconnecting"; $("conn").className = "conn down";
