@@ -54,6 +54,9 @@ source activate.sh          # exports PROJECT_ID/REGION/TOOLBOX_URL etc.
 bash setup/all.sh           # runs steps 1–6 (data plane + toolbox + state writer + simulator)
 ```
 
+**Already built it and just coming back to run it?** See **`DAILY_STARTUP.md`** — the
+short activate → `uvicorn` → click RESTART loop.
+
 > Reuse from Ch2 is a **feature**, not a shortcut — the graded new learning lives in the UI
 > interactivity, the selection-aware commentary, the CX build + grounding, and the two-engine
 > composition. See `STUDENT_GUIDE.md` (to be authored) and `spec/architecture.md`.
