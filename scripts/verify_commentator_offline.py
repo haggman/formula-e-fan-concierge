@@ -286,7 +286,7 @@ async def _drive_loop(selected_car):
         broadcasts.append(msg)
 
     loop = CommentatorLoop(
-        broadcast, debounce_s=0.0, must_say_gap_s=0.0, poll_s=0.01,
+        broadcast, reading_gap_s=0.0, poll_s=0.01,
         agent_client=agent, state_client=fake_state,
     )
     if selected_car is not None:

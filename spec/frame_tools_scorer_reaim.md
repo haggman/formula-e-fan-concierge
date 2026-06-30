@@ -196,8 +196,45 @@ Running the page surfaced two things, both fixed:
    including the cleared (null) state, so a fresh load resets the loop to
    field-wide. (Selection is single-fan/global by design; last client wins.)
 2. **Too quiet for a broadcast.** Once the stuck must-say was gone, the 15s debounce
-   left long silences. Opened the cadence in `CommentatorLoop` (and the harness):
-   `debounce_s` 15→8, `summary_every` 2→1 (recap every lap), and a new
-   `idle_filler_s` (12s) that drops a short "field update" (`kind:"update"`) when
-   nothing significant has fired for a while — a continuous, radio-like flow
-   without lowering the significance bar.
+   left long silences. First mitigated with cadence knobs (`debounce_s` 15→8,
+   `summary_every` 2→1, an `idle_filler_s`) — but that only papers over a deeper
+   mismatch, addressed by the redesign below.
+
+### Redesign — continuous play-by-play (2026-06-29) — SUPERSEDES the gate model
+
+Tuning the debounce wasn't enough: an event **gate** is the wrong control model for
+a commentator. Ch2's scorer-as-gate ("speak only when something clears a
+threshold") fits a race engineer who must not distract the driver; a live
+commentator's job is the opposite — keep talking, follow the front of the race.
+So the commentator loop was rebuilt around the scorer as a **director**, not a gate:
+
+- **`frontend/commentator_loop.py` is now a continuous beat.** Every cycle it reads
+  the field, asks `shared.scorer.score()` to RANK what's happened since the last
+  line (front-weighted via `LEAD_BATTLE_BOOST`, selected-car-boosted), and hands the
+  model the top `max_lead_events` items + the running order + **the last few lines
+  it said** (`recent_window`, a rolling deque). It ALWAYS emits — no threshold, no
+  debounce. Paced by `reading_gap_s` (the pause after each line ≈ time to read it),
+  so spacing ≈ generation time + the gap.
+- **Memory without session state.** Continuity comes from feeding the recent lines
+  back in the prompt (stateless, portable across local/engine), so each line
+  *continues* the call instead of re-introducing the field; the persona is told not
+  to repeat them. Quiet spells still produce a line (running order / storyline).
+- **`shared/scorer.py` is UNCHANGED** — same ranking; only its consumer changed
+  (rank-and-narrate instead of gate). `must_say` now just bubbles a safety car to
+  the top of the ranking so the next line leads with it.
+- **Prompts:** one builder `build_commentary_prompt(recent_lines, action_json,
+  snapshot_json, watching)` replaces the old `build_event_reaction_prompt` /
+  `build_lap_summary_prompt`. The persona is rewritten for a flowing stream that
+  leads with the front of the field and narrows onto the selected car.
+- **Reading, not audio.** Designed for on-screen reading (TTS is an optional toggle,
+  default muted — a room of 50 laptops shouldn't all talk). That removes the
+  ~7s-per-clip audio ceiling and lets each line be 2-3 flowing sentences.
+- **Knobs:** `CommentatorLoop(reading_gap_s, max_lead_events, recent_window)`;
+  harness `--reading-gap` / `--lead-events` / `--recent-window`. The old
+  `debounce_s` / `must_say_gap_s` / `summary_every` / `idle_filler_s` are gone.
+- **Cleanup:** `frontend/engineer_loop.py` and `scripts/local_test.py` (Ch2's
+  gate-model loop + harness) are superseded → tombstoned, safe to `git rm`.
+
+**Teaching beat:** "an engineer speaks only when it matters; a commentator never
+shuts up — so the deterministic code's role flips from *gatekeeper* to *director*."
+A cleaner Ch1-distinct lesson than re-teaching Ch2's gate.

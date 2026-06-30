@@ -324,11 +324,12 @@ function addCommentary(msg) {
   const cls = msg.kind === "qa" ? " qa" : msg.kind === "question" ? " question" : "";
   div.className = "call" + cls;
   const who = msg.kind === "question" ? "YOU · " : "";
-  const isCall = msg.kind && msg.kind !== "qa" && msg.kind !== "question";
+  // Continuous play-by-play lines carry no kind tag (kind ""); Q&A/questions do.
+  const isTagged = msg.kind && msg.kind !== "qa" && msg.kind !== "question";
+  const tag = isTagged ? ` · <span class="tag">${msg.kind}</span>` : "";
   const foc = (msg.selected_car != null) ? ` · <span class="foc">▸ #${msg.selected_car}</span>` : "";
   div.innerHTML =
-    `<div class="meta">${who}${fmtClock(msg.race_time_s)} · lap ${msg.lap}` +
-    (isCall ? ` · <span class="tag">${msg.kind}</span>${foc}` : "") +
+    `<div class="meta">${who}${fmtClock(msg.race_time_s)} · lap ${msg.lap}${tag}${foc}` +
     (msg.secs != null ? ` · ${msg.secs}s` : "") +
     `</div><div class="text">${msg.text}</div>`;
   const log = $("radiolog");

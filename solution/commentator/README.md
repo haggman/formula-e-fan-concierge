@@ -1,15 +1,20 @@
 # Commentator agent (ADK) — reference solution
 
-A live **broadcaster** over the Berlin R10 replay. Two modes, one agent:
+A live **continuous play-by-play broadcaster** over the Berlin R10 replay. A flowing
+stream of third-person commentary (2-3 sentences per beat, paced to reading time),
+not sparse bulletins. Two modes, one agent:
 
-- **Field-wide** (default): a running story of the whole field in third person —
-  "out of Turn 2, car 5 is through on car 6."
-- **Selection-aware**: when the fan selects a car in the UI, commentary **narrows focus**
-  to that car and its battle with whoever's next to it.
+- **Field-wide** (default): a running story led by the front of the race — "Cassidy
+  still leads from Wehrlein, but Dennis is climbing — up to P3."
+- **Selection-aware**: when the fan selects a car in the UI, that car becomes the main
+  story every line (its battle, what just changed for it), with a glance at the front.
 
-This is the direct descendant of Ch2's race engineer, **re-aimed** from a first-person
-"our car #13" engineer to a third-person field broadcaster. Treat the reuse as a feature;
-the new learning is the field POV, the broadcast persona, and the selection-aware focus.
+This is the descendant of Ch2's race engineer, **re-aimed twice**: from a first-person
+"our car #13" engineer to a third-person field broadcaster, and then from an event
+**gate** (speak only when significant) to a continuous **director** model — the scorer
+ranks what's happening, the model narrates it in a flowing stream that builds on its
+last lines. The new learning is the field POV, the broadcast persona, the selection-aware
+focus, and that gate→director flip. See `spec/frame_tools_scorer_reaim.md` §5.
 
 ## What's reused vs new
 
@@ -19,8 +24,9 @@ the new learning is the field POV, the broadcast persona, and the selection-awar
 | `config.py` (time bridge, AM constants) | Ch2 | drop `OUR_CAR_*`; add nothing car-specific — commentary is field-wide |
 | `tools/frame_tools.py` | Ch2 (car-13 POV) | **RE-AIM → field-wide + `selected_car` param.** See `spec/frame_tools_scorer_reaim.md` |
 | `shared/scorer.py` | Ch2 (us-centric weights) | **RE-AIM → field-wide events + selected-car boost.** Same spec |
-| TTS | Ch2 `frontend/tts.py` | as-is |
-| The poll→score→fire→broadcast loop | Ch2 `frontend/engineer_loop.py` | becomes `commentator_loop.py`; resolves the active package via the `AGENT_PACKAGE` seam |
+| TTS | Ch2 `frontend/tts.py` | as-is; optional toggle (default muted — built for on-screen reading) |
+| The loop | Ch2 `frontend/engineer_loop.py` (gate) | becomes `commentator_loop.py` — a **continuous director**: rank → narrate every beat, paced by `reading_gap_s`, with rolling recent-line memory. No threshold/debounce |
+| Prompts | Ch2 event/recap builders | one `build_commentary_prompt(recent_lines, action, snapshot, watching)` |
 
 ## Selected-car signal path (open #3)
 
@@ -44,9 +50,9 @@ back out. See `spec/frame_tools_scorer_reaim.md` for the boost mechanics.
   tools; no Toolbox — the commentator narrates "now", it doesn't query BigQuery).
 - `config.py` — race scope, AM constants, the `race_time → 2024 wall clock` bridge
   (no car identity — the commentator is field-wide).
-- `prompts.py` — broadcast persona + selection-aware instruction + the proactive
-  trigger-prompt builders (with the `watching` injection).
-- `snapshot.py` — field-wide authoritative snapshot (leading order + focus block).
+- `prompts.py` — continuous-broadcast persona + `build_commentary_prompt`
+  (recent lines + ranked action + live field + the `watching` selection line).
+- `snapshot.py` — field-wide snapshot (leading order + focus block) for each beat.
 - `tools/frame_tools.py` — field-wide live-state tools (`get_field_state(selected_car)`
   + focus block; `get_recent_events` / `get_events_in_range` / `get_field_am_status`
   ported from Ch2). See `spec/frame_tools_scorer_reaim.md`.

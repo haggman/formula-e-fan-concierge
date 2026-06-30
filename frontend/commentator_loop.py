@@ -1,29 +1,27 @@
-"""The commentator's trigger loop as a service component.
+"""The commentator's loop — a CONTINUOUS play-by-play broadcaster.
 
-RE-AIM of Ch2's frontend/engineer_loop.py. Same proven shape — poll Firestore
-→ score with shared.scorer → fire the agent on triggers → broadcast over the
-websocket — and ALL of Ch2's trigger policy survives intact: per-type debounce,
-the pending must-say hold (fresh snapshot at delivery, TTL expiry), the
-overdue-recap guarantee, the tool/time budget, and drop-don't-crash on failures.
+RE-AIMED twice from Ch2. Ch2's engineer loop (and our first commentator pass)
+used the scorer as a SILENCE GATE: stay quiet unless something clears a
+threshold + debounce — the right instinct for a race engineer who must not
+distract the driver. A live commentator is the opposite job: keep talking. So
+here the scorer is demoted from gate to **director**:
 
-What's NEW for the commentator (the field-wide broadcaster):
-  1. SELECTION. The loop holds the fan's currently selected car (set from the
-     websocket `{type:"select", car_number}` message via set_selection). It
-     threads that into the scorer (selected-car boost) and into the snapshot +
-     prompt ("the fan is watching car N"), so commentary follows what the fan
-     is watching without going blind to the rest of the field.
-  2. FIELD-WIDE POSITION TRACKING. prev_positions is a dict {car: position}
-     across polls, not Ch2's single "our position" — swings are detected for
-     every car.
-  3. LAP BOUNDARIES from the LEADER. Recaps key off current_leader_lap (the
-     field's lap), not one car's lap.
+  every beat (paced to reading time) →
+    1. read the live field,
+    2. ask shared.scorer to RANK what's happened since the last beat
+       (front-of-field weighted, selected-car boosted),
+    3. hand the model the top action + the running order + the LAST FEW LINES it
+       said, and get back 2-3 flowing sentences that continue the call,
+    4. broadcast it; in quiet spells it still speaks (running order / storyline).
 
-Package resolution: config/prompts/snapshot resolve through the AGENT_PACKAGE
-seam (shared/agent_pkg.py), so a student's starter.commentator drives the loop
-with THEIR persona, exactly as the reference does. The state client is the
-vendored shared.state_client (the commentator package has no per-package copy).
-The trigger POLICY below is given infrastructure and stays put; only what the
-agent is told comes from the active package.
+The result is a near-continuous stream rather than sparse bulletins. There is no
+threshold or debounce — the loop always produces the next line; the director just
+decides what that line is ABOUT. Selection still narrows the focus (the scorer
+boosts the selected car and the prompt leads with it).
+
+Package resolution: prompts/snapshot resolve through the AGENT_PACKAGE seam
+(starter vs solution commentator). State comes from the vendored
+shared.state_client.
 """
 from __future__ import annotations
 
@@ -31,67 +29,57 @@ import asyncio
 import json
 import logging
 import time
-from collections import Counter
+from collections import Counter, deque
 from typing import Awaitable, Callable, Optional
 
 from frontend.agent_client import agent_module, make_agent_client
 from shared.models import EventType, RaceState
-from shared.scorer import DEFAULT_THRESHOLD, score
+from shared.scorer import score
 from shared.state_client import get_state_client
 
 # --- resolved through the AGENT_PACKAGE seam (starter vs solution commentator) ---
 _prompts = agent_module("prompts")
-build_event_reaction_prompt = _prompts.build_event_reaction_prompt
-build_lap_summary_prompt = _prompts.build_lap_summary_prompt
+build_commentary_prompt = _prompts.build_commentary_prompt
 snapshot_dict = agent_module("snapshot").snapshot_dict
 
 logger = logging.getLogger("commentator")
 
 AM_LOOKBACK_S = 30
-FAIL_COOLDOWN_S = 5
-MUST_SAY_TTL_S = 25
+FAIL_COOLDOWN_S = 4.0
 
 Broadcast = Callable[[dict], Awaitable[None]]
 
 
 class CommentatorLoop:
-    """Background trigger loop for the live broadcast commentator. One per process."""
+    """Continuous play-by-play loop for the live broadcast commentator."""
 
     def __init__(
         self,
         broadcast: Broadcast,
         *,
-        threshold: int = DEFAULT_THRESHOLD,
-        debounce_s: float = 8.0,
-        must_say_gap_s: float = 5.0,
-        summary_every: int = 1,
-        idle_filler_s: float = 12.0,
+        reading_gap_s: float = 4.0,
+        max_lead_events: int = 4,
+        recent_window: int = 4,
         poll_s: float = 2.0,
         agent_client=None,
         state_client=None,
     ) -> None:
         self.broadcast = broadcast
-        self.threshold = threshold
-        self.debounce_s = debounce_s
-        self.must_say_gap_s = must_say_gap_s
-        self.summary_every = summary_every
-        # If nothing has fired for this long (wall seconds), drop in a short
-        # field update so the broadcast keeps a continuous, radio-like flow
-        # through the quiet stretches. 0 disables it.
-        self.idle_filler_s = idle_filler_s
+        # Pause AFTER each line lands, so the next is generated about when a fan
+        # finishes reading the last. The real spacing ≈ generation time + this.
+        self.reading_gap_s = reading_gap_s
+        # How many ranked items the director hands the model per beat.
+        self.max_lead_events = max_lead_events
+        # How many recent lines to feed back for continuity / no-repeat.
+        self.recent_window = recent_window
         self.poll_s = poll_s
-        # Injectable for tests/harnesses; default to the real Firestore reader
-        # and the env-selected (local/engine) ADK agent client.
         self.client = state_client if state_client is not None else get_state_client()
         self.agent = agent_client if agent_client is not None else make_agent_client()
-        # The car the fan is currently watching (None = pure field-wide).
-        # Updated from the websocket {type:"select"} message.
         self._selected_car: Optional[int] = None
         self.stats: Counter = Counter()
-        self._stats_logged_wall = time.monotonic()
 
     # ------------------------------------------------------------------
-    # Selection — set from the websocket select message
+    # Selection — set from the websocket {type:"select"} message
     # ------------------------------------------------------------------
 
     def set_selection(self, car_number: Optional[int]) -> None:
@@ -101,64 +89,59 @@ class CommentatorLoop:
         self._selected_car = car_number
 
     def _watching_line(self, state: RaceState) -> str:
-        """The 'fan is watching car N' line injected into the trigger prompt."""
         if self._selected_car is None:
             return ""
         car = state.car_by_number(self._selected_car)
         drv = f" ({car.driver_short_name})" if car else ""
-        return (f"THE FAN IS WATCHING car {self._selected_car}{drv} — open the "
-                "call on that car and its battle, then widen to the field.")
+        return (f"THE FAN IS WATCHING car {self._selected_car}{drv} — make that car "
+                "your main story this turn: lead with it and its battle, then glance "
+                "at the front of the race.")
 
     # ------------------------------------------------------------------
-    # Agent invocation
+    # One spoken line
     # ------------------------------------------------------------------
 
-    async def _deliver(self, kind: str, prompt: str, now_s: int, lap, reason: str) -> bool:
-        """Fire the agent; broadcast the call. False (and cooldown) on failure."""
+    async def _deliver(self, prompt: str, now_s: int, lap, *, kind: str = "") -> Optional[str]:
+        """Fire the agent; broadcast the line. Returns the text, or None on failure."""
         try:
             text, tools, secs = await self.agent.fire(prompt)
         except Exception as e:
             msg = str(e)
-            logger.warning("call dropped (%s): %s", kind,
-                           msg.splitlines()[0][:160] if msg else type(e).__name__)
-            self.stats[f"dropped:{kind}"] += 1
+            logger.warning("line dropped: %s", msg.splitlines()[0][:160] if msg else type(e).__name__)
+            self.stats["dropped"] += 1
             if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
-                self.stats[f"throttled:{kind}"] += 1
-            return False
-        logger.info("[t=%s lap %s] %s (%.1fs, %d tools) sel=%s: %s",
-                    now_s, lap, kind, secs, tools, self._selected_car, text)
+                self.stats["throttled"] += 1
+            return None
+        if not text:
+            self.stats["empty"] += 1
+            return None
+        logger.info("[t=%s lap %s] (%.1fs, %d tools) sel=%s: %s",
+                    now_s, lap, secs, tools, self._selected_car, text)
         await self.broadcast({
             "type": "radio", "kind": kind,
             "race_time_s": now_s, "lap": lap,
             "selected_car": self._selected_car,
-            "reason": reason, "text": text,
-            "secs": round(secs, 1), "tools": tools,
+            "text": text, "secs": round(secs, 1), "tools": tools,
         })
-        self.stats[f"fired:{kind}"] += 1
-        return True
+        self.stats["fired"] += 1
+        return text
 
     async def ask(self, question: str) -> str:
-        """Optional fan-initiated question to the commentator. Persistent
-        session; raises on failure (the websocket layer reports it)."""
+        """Optional fan-initiated question to the commentator (persistent session)."""
         return await self.agent.ask(question)
 
     # ------------------------------------------------------------------
-    # The loop
+    # The continuous loop
     # ------------------------------------------------------------------
 
     async def run(self) -> None:
-        last_scored_to: int | None = None
-        last_fire_wall: float = -1e9
+        recent: deque[str] = deque(maxlen=self.recent_window)
         prev_positions: dict[int, int] = {}
-        last_lap: int | None = None
-        last_summary_lap: int | None = None
-        due_summary_lap: int | None = None  # sticky: an owed recap survives blocked polls
-        pending_must_say = None  # (TriggerCandidate, race_time_s first seen)
+        last_scored_to: Optional[int] = None
 
-        logger.info("commentator loop online — threshold=%s debounce=%ss "
-                    "must-say gap=%ss recap every %s laps",
-                    self.threshold, self.debounce_s, self.must_say_gap_s,
-                    self.summary_every)
+        logger.info("commentator loop online — continuous play-by-play "
+                    "(reading gap %.1fs, lead events %d)",
+                    self.reading_gap_s, self.max_lead_events)
 
         while True:
             try:
@@ -173,22 +156,17 @@ class CommentatorLoop:
             now_s = state.race_time_s
 
             if last_scored_to is not None and now_s < last_scored_to - 5:
-                # race time went backwards: replay restarted — flush loop state
+                # replay restarted — flush continuity so the new race starts clean
                 logger.info("replay restart detected (t=%s < %s) — resetting", now_s, last_scored_to)
                 if self.stats:
-                    logger.info("scoreboard (race just ended): %s",
-                                dict(sorted(self.stats.items())))
+                    logger.info("scoreboard (race ended): %s", dict(sorted(self.stats.items())))
                     self.stats.clear()
-                last_scored_to = None
+                recent.clear()
                 prev_positions = {}
-                last_lap = None
-                last_summary_lap = None
-                due_summary_lap = None
-                pending_must_say = None
+                last_scored_to = None
                 self.agent.reset_qa_session()
 
-            from_s = (last_scored_to + 1) if last_scored_to is not None \
-                else max(0, now_s - int(self.poll_s) * 10)
+            from_s = (last_scored_to + 1) if last_scored_to is not None else max(0, now_s - 20)
             try:
                 new_events = self.client.query_events(
                     from_race_time_s=from_s, to_race_time_s=now_s, limit=100,
@@ -203,6 +181,7 @@ class CommentatorLoop:
                 await asyncio.sleep(self.poll_s)
                 continue
 
+            # The DIRECTOR: rank what's happened (front-weighted, selection-boosted).
             candidates = score(
                 state, new_events,
                 selected_car=self._selected_car,
@@ -210,105 +189,25 @@ class CommentatorLoop:
                 prev_positions=prev_positions or None,
             )
             last_scored_to = now_s
-            # Refresh field-wide position map for the NEXT poll's swing detection.
-            prev_positions = {
-                c.car_number: c.position for c in state.cars if not c.is_retired
-            }
+            prev_positions = {c.car_number: c.position for c in state.cars if not c.is_retired}
 
+            action = [c.reason for c in candidates[:self.max_lead_events]]
             lap_now = state.current_leader_lap
-            lap_changed = (
-                last_lap is not None and lap_now is not None
-                and lap_now > last_lap and last_lap >= 1
-            )
-            completed_lap = last_lap if lap_changed else None
-            last_lap = lap_now if lap_now is not None else last_lap
-            if lap_changed and (
-                last_summary_lap is None
-                or (completed_lap - last_summary_lap) >= self.summary_every
-            ):
-                due_summary_lap = completed_lap  # newer boundary overwrites older debt
-
-            best = candidates[0] if candidates else None
-            if best and best.must_say:
-                if pending_must_say is None or best.score >= pending_must_say[0].score:
-                    pending_must_say = (best, now_s)
-            if pending_must_say and now_s - pending_must_say[1] > MUST_SAY_TTL_S:
-                logger.info("expired must-say: %s", pending_must_say[0].reason)
-                self.stats["expired:must_say"] += 1
-                pending_must_say = None
-
-            wall_gap = time.monotonic() - last_fire_wall
-            fired = False
-            attempted = False
             watching = self._watching_line(state)
+            prompt = build_commentary_prompt(
+                recent_lines="\n".join(recent),
+                action_json=json.dumps(action),
+                snapshot_json=json.dumps(snapshot_dict(state, self._selected_car)),
+                watching=watching,
+            )
 
-            if pending_must_say and wall_gap >= self.must_say_gap_s:
-                attempted = True
-                cand, _ = pending_must_say
-                prompt = build_event_reaction_prompt(
-                    reason=cand.reason,
-                    snapshot_json=json.dumps(snapshot_dict(state, self._selected_car)),
-                    events_json=json.dumps(cand.events),
-                    watching=watching,
-                )
-                fired = await self._deliver("must_say", prompt, now_s, lap_now, cand.reason)
-                if fired:
-                    pending_must_say = None
-            elif due_summary_lap is not None and wall_gap >= self.must_say_gap_s:
-                attempted = True
-                prompt = build_lap_summary_prompt(
-                    lap_number=due_summary_lap,
-                    snapshot_json=json.dumps(snapshot_dict(state, self._selected_car)),
-                    watching=watching,
-                )
-                fired = await self._deliver("recap", prompt, now_s, lap_now,
-                                            f"end of lap {due_summary_lap}")
-                if fired:
-                    last_summary_lap = due_summary_lap
-                    due_summary_lap = None
-            elif best and best.score >= self.threshold and wall_gap >= self.debounce_s:
-                attempted = True
-                prompt = build_event_reaction_prompt(
-                    reason=best.reason,
-                    snapshot_json=json.dumps(snapshot_dict(state, self._selected_car)),
-                    events_json=json.dumps(best.events),
-                    watching=watching,
-                )
-                fired = await self._deliver("event", prompt, now_s, lap_now, best.reason)
-            elif lap_changed and wall_gap >= self.debounce_s:
-                attempted = True
-                prompt = build_lap_summary_prompt(
-                    lap_number=completed_lap,
-                    snapshot_json=json.dumps(snapshot_dict(state, self._selected_car)),
-                    watching=watching,
-                )
-                fired = await self._deliver("recap", prompt, now_s, lap_now,
-                                            f"end of lap {completed_lap}")
-                if fired:
-                    last_summary_lap = completed_lap
-            elif self.idle_filler_s and wall_gap >= self.idle_filler_s:
-                # Quiet stretch — nothing significant for a while. Keep the
-                # broadcast flowing with a short field update (radio-like).
-                attempted = True
-                prompt = build_lap_summary_prompt(
-                    lap_number=lap_now or 0,
-                    snapshot_json=json.dumps(snapshot_dict(state, self._selected_car)),
-                    watching=watching,
-                )
-                fired = await self._deliver("update", prompt, now_s, lap_now, "field update")
-            elif best and best.score >= self.threshold:
-                self.stats["suppressed"] += 1
-
-            if fired:
-                last_fire_wall = time.monotonic()
-            elif attempted:
-                last_fire_wall = time.monotonic() - self.debounce_s + FAIL_COOLDOWN_S
-
-            if time.monotonic() - self._stats_logged_wall >= 120 and self.stats:
-                logger.info("scoreboard: %s", dict(sorted(self.stats.items())))
-                self._stats_logged_wall = time.monotonic()
-
-            await asyncio.sleep(self.poll_s)
+            text = await self._deliver(prompt, now_s, lap_now)
+            if text:
+                recent.append(text)
+                await asyncio.sleep(self.reading_gap_s)
+            else:
+                # generation failed — brief cooldown, then carry on
+                await asyncio.sleep(FAIL_COOLDOWN_S)
 
     async def close(self) -> None:
         await self.agent.close()

@@ -81,20 +81,27 @@ Firestore is stale, not a code bug.
 ## 3. Watch it commentate (the live end-to-end)
 
 ```bash
-# field-wide — narrates the most significant action across the whole field:
-python scripts/local_commentator.py --duration 380 --verbose
+# field-wide — continuous play-by-play, front of the field:
+python scripts/local_commentator.py --duration 180
 
-# selection-aware — simulate the fan clicking car 13; commentary opens on it:
-python scripts/local_commentator.py --select 13 --duration 380 --verbose
+# selection-aware — narrow the call onto car 13:
+python scripts/local_commentator.py --select 13 --duration 180
 ```
 
+The commentator is a **continuous play-by-play** caller (not sparse event
+bulletins): a flowing line every few seconds that builds on the last, paced to
+reading time (`--reading-gap`). The scorer is the *director* — it ranks what's
+happening (front-weighted, selected-car-boosted) and the model narrates it.
+
 What good looks like:
-- **Field-wide:** third-person calls on the leaders and the biggest movers
-  ("car 5 is through on car 6 into turn 1"), recaps on lap boundaries, must-say on
-  safety car / chequered. No first-person, no invented gaps in seconds.
-- **`--select 13`:** the same race, but calls now open on car 13 and its battle
-  ("car 13 holds off car 94 for fifth"), and events near car 13 fire more readily
-  (the selected-car boost). It never goes fully blind to the front of the race.
+- **Field-wide:** a steady stream led by the front of the race and the lead battle,
+  dropping down the order for a notable move or an Attack Mode play, then back to
+  the front; quiet spells become "as it stands…" / storyline lines. Each line
+  continues the last (no re-introducing the whole field). Third person, positions
+  not seconds, no "on his gearbox" closeness.
+- **`--select 13`:** the same stream, but car 13 is the main story every line —
+  its battle, what just changed for it — with a glance at the front. The line in
+  the UI is marked `▸ #13`.
 
 Switch `--select` between runs to feel the narrowing. In the product the UI sends
 this over the websocket (`{type:"select", car_number}`) and the loop's
@@ -152,14 +159,14 @@ travels the websocket to the loop and back.
 - **Pace it for a busy stretch:** to demo a dramatic moment, `/jump` to a lap and
   let it **play forward** (don't pause) so events flow from there; a frozen race
   produces no triggers.
-- **Tuning levers** (from the live runs — see `spec/frame_tools_scorer_reaim.md`
-  §5): the persona narrates from the snapshot and avoids tool calls to stay fast;
-  it speaks in positions, not seconds or "on his gearbox" closeness. **Cadence**
-  for a continuous radio feel: the loop debounces at 8s, recaps every lap, and
-  drops a short "field update" if nothing has fired for `idle_filler_s` (12s);
-  raise `idle_filler_s`/`debounce_s` (CommentatorLoop) for calm, lower for chatter
-  (`--debounce` / `--idle-filler` on the harness). If the `--select` feed feels
-  too chatty, raise `SELECTED_CAR_MUST_SAY_MIN` in `shared/scorer.py`.
+- **Tuning levers** (see `spec/frame_tools_scorer_reaim.md` §5): the commentator is
+  a continuous play-by-play loop (scorer as *director*, not a gate). **Cadence** is
+  `reading_gap_s` on `CommentatorLoop` (`--reading-gap` on the harness) — the pause
+  after each line ≈ reading time; raise it to slow the stream, lower it to speed up.
+  `max_lead_events` / `--lead-events` = how much action the model gets per line;
+  `recent_window` / `--recent-window` = how many prior lines feed continuity. The
+  persona narrates from the prompt (no tool calls), speaks in positions not
+  seconds, and leads with the front of the field (or the selected car).
 - **Selection is server-global.** The `CommentatorLoop` holds ONE selection for
   the whole process and it outlives a browser tab. The page re-syncs it on every
   websocket connect (including clearing to field-wide), so a fresh load resets it.
