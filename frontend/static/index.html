@@ -37,8 +37,21 @@
   /* ---- left column: map (top) + order/stats (bottom) ---- */
   #left { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
 
-  #mapwrap { flex: 1 1 52%; min-height: 0; position: relative; border-bottom: 1px solid var(--line); }
+  #mapwrap { flex: 1 1 36%; min-height: 0; position: relative; border-bottom: 1px solid var(--line); }
   #map { width: 100%; height: 100%; display: block; }
+
+  /* horse-race gap strip: leader at left, spacing ∝ real along-track gap */
+  #gapwrap { flex: 0 0 auto; border-bottom: 1px solid var(--line); padding: 6px 0 8px; }
+  .striplabel { font-size: 10px; color: var(--dim); letter-spacing: 1.5px; padding: 0 12px 5px; }
+  #gapstrip { position: relative; height: 26px; margin: 0 12px; }
+  .gapbox {
+    position: absolute; top: 0; width: 24px; height: 24px; border-radius: 5px;
+    background: var(--panel); border: 1px solid var(--line); color: var(--text);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; cursor: pointer; transition: left .8s linear;
+  }
+  .gapbox.am { border-color: var(--am); color: var(--am); }
+  .gapbox.sel { background: var(--accent); border-color: var(--accent); color: #000; z-index: 2; }
   /* stroke-width is in METRES (the viewBox is metres) — Formula E tracks are ~12 m wide.
      Two stacked paths: a lighter kerb/border under a darker tarmac surface. */
   #track-edge { fill: none; stroke: #6e7681; stroke-width: 13; stroke-linejoin: round; stroke-linecap: round; }
@@ -158,6 +171,10 @@
       </svg>
       <div id="map-msg">Loading track…</div>
     </div>
+    <div id="gapwrap">
+      <div class="striplabel">FIELD — leader at left · spacing ∝ gap · click to follow</div>
+      <div id="gapstrip"></div>
+    </div>
     <div id="leftlower">
       <div id="sel-head">
         <span class="who" id="sel-who">Running order — click a car to follow it</span>
@@ -214,6 +231,7 @@ const fmtClock = s => `t=${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padS
 let selectedCar = null;   // int | null
 let lastState = null;     // most recent state message
 let T = null;             // projection transform from track_outline.json
+let CENTER = [], CUMLEN = [], TRACK_LEN = 0;  // centerline points + arc-length (metres)
 
 // ---- selection ----
 function sendSelection() {
@@ -237,8 +255,18 @@ async function loadOutline() {
     $("map").setAttribute("viewBox", o.viewBox);
     $("track").setAttribute("d", o.path);
     $("track-edge").setAttribute("d", o.path);
+    // parse the path (SVG units == metres) into centerline points + arc-length,
+    // so we can compute each car's distance around the lap for the gap strip
+    const nums = (o.path.match(/-?\d+(?:\.\d+)?/g) || []).map(Number);
+    CENTER = [];
+    for (let i = 0; i + 1 < nums.length; i += 2) CENTER.push([nums[i], nums[i + 1]]);
+    CUMLEN = [0];
+    for (let i = 1; i < CENTER.length; i++) {
+      CUMLEN.push(CUMLEN[i - 1] + Math.hypot(CENTER[i][0] - CENTER[i - 1][0], CENTER[i][1] - CENTER[i - 1][1]));
+    }
+    TRACK_LEN = CUMLEN.length ? CUMLEN[CUMLEN.length - 1] : 0;
     $("map-msg").style.display = "none";
-    if (lastState) renderMap(lastState.cars);
+    if (lastState) renderState(lastState);
   } catch {
     $("map-msg").textContent =
       "Track outline not loaded. Run notebooks/track_map_outline.ipynb and drop " +
@@ -251,6 +279,60 @@ function proj(lat, lng) {
   const x = (lng - T.lng0) * T.m_per_deg_lng;
   const y = (lat - T.lat0) * T.m_per_deg_lat;
   return [(x - T.minx) + T.pad, (T.maxy - y) + T.pad];
+}
+// distance (metres) around the lap for a car at (lat,lng) — nearest centerline vertex
+function progress(lat, lng) {
+  const p = proj(lat, lng);
+  if (!p || !CENTER.length) return null;
+  let best = 0, bd = Infinity;
+  for (let i = 0; i < CENTER.length; i++) {
+    const dx = CENTER[i][0] - p[0], dy = CENTER[i][1] - p[1], d = dx * dx + dy * dy;
+    if (d < bd) { bd = d; best = i; }
+  }
+  return CUMLEN[best];
+}
+
+// horse-race gap strip: order by official position, space by real along-track gap
+function renderGapStrip(cars) {
+  const strip = $("gapstrip");
+  if (!TRACK_LEN) { strip.innerHTML = ""; return; }
+  const items = cars
+    .filter(c => !c.retired && c.lat != null && c.lng != null)
+    .map(c => ({ c, s: progress(c.lat, c.lng) }))
+    .filter(o => o.s != null)
+    .sort((a, b) => a.c.position - b.c.position);
+  if (!items.length) { strip.innerHTML = ""; return; }
+
+  // gap-to-leader in metres, accumulated from adjacent gaps (robust at the line)
+  items[0].gap = 0;
+  for (let i = 1; i < items.length; i++) {
+    const ahead = items[i - 1], cur = items[i];
+    let g = (ahead.c.lap - cur.c.lap) * TRACK_LEN + (ahead.s - cur.s);
+    if (g < 0) g = 0;
+    items[i].gap = items[i - 1].gap + g;
+  }
+  const maxGap = items[items.length - 1].gap || 1;
+  const W = strip.clientWidth || 360, boxW = 24;
+  const avail = Math.max(50, W - boxW);
+  const scale = avail / maxGap;                                   // px per metre (scale-to-fit)
+  const minSpace = Math.min(boxW + 2, avail / Math.max(1, items.length));  // keep bunched cars readable
+
+  strip.innerHTML = "";
+  let prevX = -1e9;
+  for (const o of items) {
+    let x = o.gap * scale;
+    if (x - prevX < minSpace) x = prevX + minSpace;
+    prevX = x;
+    const sel = o.c.car === selectedCar;
+    const d = document.createElement("div");
+    d.className = "gapbox" + (sel ? " sel" : "") + (o.c.am_active ? " am" : "");
+    d.style.left = x.toFixed(1) + "px";
+    d.textContent = o.c.car;
+    d.title = `#${o.c.car} ${lastName(o.c.driver)} · P${o.c.position}` +
+              (o.gap ? ` · +${Math.round(o.gap)} m behind leader` : " · leader");
+    d.onclick = () => selectCar(o.c.car);
+    strip.appendChild(d);
+  }
 }
 
 // ---- render: map dots, order list, selected-car stats ----
@@ -332,6 +414,7 @@ function renderState(msg) {
   $("phase").textContent = msg.race_phase.replace(/_/g, " ");
   $("clock").textContent = fmtClock(msg.race_time_s);
   renderMap(msg.cars);
+  renderGapStrip(msg.cars);
   renderOrderAndStats(msg.cars);
 }
 
