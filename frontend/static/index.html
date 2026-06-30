@@ -49,15 +49,20 @@
     position: absolute; top: 0; width: 24px; height: 24px; border-radius: 5px;
     background: var(--panel); border: 1px solid var(--line); color: var(--text);
     display: flex; align-items: center; justify-content: center;
-    font-size: 11px; font-weight: 700; cursor: pointer; transition: left .8s linear;
+    font-size: 11px; font-weight: 700; cursor: pointer;
+    transition: left 1s linear, background .3s, border-color .3s, color .3s;
   }
   .gapbox.am { border-color: var(--am); color: var(--am); }
   .gapbox.sel { background: var(--accent); border-color: var(--accent); color: #000; z-index: 2; }
+  #gapdiv { position: absolute; top: -3px; width: 1px; height: 32px; background: var(--dim); opacity: .45; display: none; }
+  #gaplbl { position: absolute; top: 7px; font-size: 9px; color: var(--dim); letter-spacing: 1px;
+            white-space: nowrap; transform: translateX(5px); display: none; }
   /* stroke-width is in METRES (the viewBox is metres) — Formula E tracks are ~12 m wide.
      Two stacked paths: a lighter kerb/border under a darker tarmac surface. */
-  #track-edge { fill: none; stroke: #6e7681; stroke-width: 13; stroke-linejoin: round; stroke-linecap: round; }
-  #track { fill: none; stroke: #21262d; stroke-width: 10; stroke-linejoin: round; stroke-linecap: round; }
-  .cardot { fill: var(--dim); stroke: var(--bg); stroke-width: 1.5; cursor: pointer; }
+  #track-edge { fill: none; stroke: #6e7681; stroke-width: 16; stroke-linejoin: round; stroke-linecap: round; }
+  #track { fill: none; stroke: #21262d; stroke-width: 12; stroke-linejoin: round; stroke-linecap: round; }
+  .cardot { fill: var(--dim); stroke: var(--bg); stroke-width: 1.5; cursor: pointer;
+            transition: cx 1s linear, cy 1s linear, r .25s, fill .25s; }
   .cardot:hover { fill: var(--text); }
   .cardot.sel { fill: var(--accent); }
   .cardot.am { fill: var(--am); }
@@ -164,7 +169,7 @@
 </header>
 <div id="gapwrap">
   <div class="striplabel">FIELD — leader at left · spacing ∝ gap · click to follow</div>
-  <div id="gapstrip"></div>
+  <div id="gapstrip"><div id="gapdiv"></div><div id="gaplbl">well behind</div></div>
 </div>
 <main>
   <div id="left">
@@ -233,6 +238,7 @@ let selectedCar = null;   // int | null
 let lastState = null;     // most recent state message
 let T = null;             // projection transform from track_outline.json
 let CENTER = [], CUMLEN = [], TRACK_LEN = 0;  // centerline points + arc-length (metres)
+let carDots = {}, gapBoxes = {};              // reused DOM elements, so CSS transitions can animate motion
 
 // ---- selection ----
 function sendSelection() {
@@ -293,80 +299,108 @@ function progress(lat, lng) {
   return CUMLEN[best];
 }
 
-// horse-race gap strip: order by official position, space by real along-track gap
+// horse-race gap strip: order by official position, space by real along-track gap.
+// Boxes are reused per car so the CSS `left` transition slides them smoothly. A
+// far-behind (pitted/lapped) group is split off behind a "well behind" divider so
+// the main pack still spreads across the strip.
 function renderGapStrip(cars) {
-  const strip = $("gapstrip");
-  if (!TRACK_LEN) { strip.innerHTML = ""; return; }
-  const items = cars
+  const strip = $("gapstrip"), div = $("gapdiv"), lbl = $("gaplbl");
+  const items = !TRACK_LEN ? [] : cars
     .filter(c => !c.retired && c.lat != null && c.lng != null)
     .map(c => ({ c, s: progress(c.lat, c.lng) }))
     .filter(o => o.s != null)
     .sort((a, b) => a.c.position - b.c.position);
-  if (!items.length) { strip.innerHTML = ""; return; }
 
-  // gap-to-leader in metres, accumulated from adjacent gaps (robust at the line)
-  items[0].gap = 0;
-  for (let i = 1; i < items.length; i++) {
-    const ahead = items[i - 1], cur = items[i];
-    let g = (ahead.c.lap - cur.c.lap) * TRACK_LEN + (ahead.s - cur.s);
+  // gap-to-leader (metres), accumulated from adjacent gaps (robust at the line)
+  for (let i = 0; i < items.length; i++) {
+    if (i === 0) { items[0].gap = 0; continue; }
+    let g = (items[i-1].c.lap - items[i].c.lap) * TRACK_LEN + (items[i-1].s - items[i].s);
     if (g < 0) g = 0;
-    items[i].gap = items[i - 1].gap + g;
+    items[i].gap = items[i-1].gap + g;
   }
-  const maxGap = items[items.length - 1].gap || 1;
-  const n = items.length;
-  const W = strip.clientWidth || 800, boxW = 24;
-  const avail = Math.max(50, W - boxW);
-  // Reserve i*minSpace for the boxes before each one and scale the proportional
-  // part into what's left. Guarantees: boxes never overlap (>= minSpace apart)
-  // AND never exceed the strip (last box lands exactly at the right edge) — even
-  // when the leader is far ahead and the rest are bunched.
-  const minSpace = Math.min(boxW + 4, avail / n);
-  const usable = Math.max(1, avail - (n - 1) * minSpace);
 
-  strip.innerHTML = "";
-  for (let i = 0; i < n; i++) {
-    const o = items[i];
-    const x = (o.gap / maxGap) * usable + i * minSpace;
-    const sel = o.c.car === selectedCar;
-    const d = document.createElement("div");
-    d.className = "gapbox" + (sel ? " sel" : "") + (o.c.am_active ? " am" : "");
-    d.style.left = x.toFixed(1) + "px";
-    d.textContent = o.c.car;
-    d.title = `#${o.c.car} ${lastName(o.c.driver)} · P${o.c.position}` +
-              (o.gap ? ` · +${Math.round(o.gap)} m behind leader` : " · leader");
-    d.onclick = () => selectCar(o.c.car);
-    strip.appendChild(d);
+  const n = items.length, boxW = 24;
+  const W = strip.clientWidth || 800, avail = Math.max(50, W - boxW);
+
+  // detect a "well behind" trailing group (a big jump beyond the field's norm)
+  const adj = items.map((o, i) => i ? o.gap - items[i-1].gap : 0);
+  const posGaps = adj.slice(1).filter(g => g > 0).sort((a, b) => a - b);
+  const med = posGaps.length ? posGaps[Math.floor(posGaps.length / 2)] : 0;
+  const thresh = Math.max(300, 8 * med);
+  let split = n;
+  for (let i = 1; i < n; i++) { if (adj[i] > thresh) { split = i; break; } }
+  const trailing = split < n;
+
+  // place a group's boxes into [x0,x1]: spacing ∝ gap, with a guaranteed minimum
+  const targetX = {};
+  function place(group, x0, x1) {
+    const m = group.length; if (!m) return;
+    const minSpace = Math.min(boxW + 4, (x1 - x0) / m);
+    const usable = Math.max(1, (x1 - x0) - (m - 1) * minSpace);
+    const span = (group[m-1].gap - group[0].gap) || 1;
+    for (let i = 0; i < m; i++)
+      targetX[group[i].c.car] = x0 + ((group[i].gap - group[0].gap) / span) * usable + i * minSpace;
+  }
+  if (trailing) {
+    place(items.slice(0, split), 0, avail * 0.80);
+    place(items.slice(split), avail * 0.89, avail);
+    const dx = avail * 0.85;
+    div.style.left = dx.toFixed(1) + "px"; div.style.display = "block";
+    lbl.style.left = dx.toFixed(1) + "px"; lbl.style.display = "block";
+  } else {
+    place(items, 0, avail);
+    div.style.display = "none"; lbl.style.display = "none";
+  }
+
+  // reuse boxes so `left` transitions animate the motion
+  const present = new Set();
+  for (const o of items) {
+    const car = o.c.car; present.add(car);
+    let el = gapBoxes[car];
+    if (!el) {
+      el = document.createElement("div");
+      el.textContent = car;
+      el.onclick = () => selectCar(car);
+      strip.appendChild(el);
+      gapBoxes[car] = el;
+    }
+    el.style.left = (targetX[car] ?? 0).toFixed(1) + "px";
+    el.className = "gapbox" + (car === selectedCar ? " sel" : "") + (o.c.am_active ? " am" : "");
+    el.title = `#${car} ${lastName(o.c.driver)} · P${o.c.position}` +
+               (o.gap ? ` · +${Math.round(o.gap)} m behind leader` : " · leader");
+  }
+  for (const car in gapBoxes) {
+    if (!present.has(Number(car))) { gapBoxes[car].remove(); delete gapBoxes[car]; }
   }
 }
 
 // ---- render: map dots, order list, selected-car stats ----
 function renderMap(cars) {
-  const g = $("cars");
-  g.innerHTML = "";
   if (!T) return;
+  const g = $("cars");
+  const present = new Set();
   for (const c of cars) {
     if (c.retired || c.lat == null || c.lng == null) continue;
     const p = proj(c.lat, c.lng);
     if (!p) continue;
+    present.add(c.car);
     const sel = c.car === selectedCar;
-    const dot = document.createElementNS(SVGNS, "circle");
+    let dot = carDots[c.car];
+    if (!dot) {  // create once, then reuse so the CSS transition animates movement
+      dot = document.createElementNS(SVGNS, "circle");
+      dot.addEventListener("click", () => selectCar(c.car));
+      dot.appendChild(document.createElementNS(SVGNS, "title"));
+      g.appendChild(dot);
+      carDots[c.car] = dot;
+    }
     dot.setAttribute("cx", p[0].toFixed(1));
     dot.setAttribute("cy", p[1].toFixed(1));
     dot.setAttribute("r", sel ? 9 : 6);
     dot.setAttribute("class", "cardot" + (sel ? " sel" : c.am_active ? " am" : ""));
-    dot.addEventListener("click", () => selectCar(c.car));
-    const t = document.createElementNS(SVGNS, "title");
-    t.textContent = `#${c.car} ${lastName(c.driver)} · P${c.position}`;
-    dot.appendChild(t);
-    g.appendChild(dot);
-    if (sel) {  // label the followed car
-      const lbl = document.createElementNS(SVGNS, "text");
-      lbl.setAttribute("x", (p[0] + 11).toFixed(1));
-      lbl.setAttribute("y", (p[1] + 4).toFixed(1));
-      lbl.setAttribute("class", "carlabel");
-      lbl.textContent = `#${c.car}`;
-      g.appendChild(lbl);
-    }
+    dot.firstChild.textContent = `#${c.car} ${lastName(c.driver)} · P${c.position}`;
+  }
+  for (const car in carDots) {  // drop cars no longer running
+    if (!present.has(Number(car))) { carDots[car].remove(); delete carDots[car]; }
   }
 }
 
