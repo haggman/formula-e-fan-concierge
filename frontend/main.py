@@ -198,9 +198,15 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Race-Day Companion", lifespan=lifespan)
 
 
+# Dev convenience: never let the browser / Cloud Shell Web Preview cache the page
+# or the outline, so a reload always picks up the latest build (the page and the
+# track JSON change often during the build, and stale caches masquerade as bugs).
+_NO_CACHE = {"Cache-Control": "no-store, must-revalidate"}
+
+
 @app.get("/")
 async def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(STATIC_DIR / "index.html", headers=_NO_CACHE)
 
 
 @app.get("/track_outline.json")
@@ -212,7 +218,7 @@ async def track_outline() -> FileResponse:
     path = STATIC_DIR / "track_outline.json"
     if not path.exists():
         raise HTTPException(404, "track_outline.json not staged in frontend/static/")
-    return FileResponse(path)
+    return FileResponse(path, headers=_NO_CACHE)
 
 
 async def _handle_ask(question: str) -> None:
