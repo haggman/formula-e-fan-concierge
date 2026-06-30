@@ -239,6 +239,7 @@ let lastState = null;     // most recent state message
 let T = null;             // projection transform from track_outline.json
 let CENTER = [], CUMLEN = [], TRACK_LEN = 0;  // centerline points + arc-length (metres)
 let carDots = {}, gapBoxes = {};              // reused DOM elements, so CSS transitions can animate motion
+let lastLap = {}, sSF = null, lastRaceTime = -1;  // lap tracking + calibrated start/finish arc-length
 
 // ---- selection ----
 function sendSelection() {
@@ -287,16 +288,26 @@ function proj(lat, lng) {
   const y = (lat - T.lat0) * T.m_per_deg_lat;
   return [(x - T.minx) + T.pad, (T.maxy - y) + T.pad];
 }
-// distance (metres) around the lap for a car at (lat,lng) — nearest centerline vertex
-function progress(lat, lng) {
+// nearest centerline vertex to a car's GPS (shared by progress + snap-to-track)
+function nearestIdx(lat, lng) {
   const p = proj(lat, lng);
-  if (!p || !CENTER.length) return null;
+  if (!p || !CENTER.length) return -1;
   let best = 0, bd = Infinity;
   for (let i = 0; i < CENTER.length; i++) {
     const dx = CENTER[i][0] - p[0], dy = CENTER[i][1] - p[1], d = dx * dx + dy * dy;
     if (d < bd) { bd = d; best = i; }
   }
-  return CUMLEN[best];
+  return best;
+}
+// distance (metres) around the lap — arc-length of the nearest centerline point
+function progress(lat, lng) { const i = nearestIdx(lat, lng); return i < 0 ? null : CUMLEN[i]; }
+// snap a car ONTO the centerline ("on the rails") so its dot never drifts off the ribbon
+function snapToTrack(lat, lng) { const i = nearestIdx(lat, lng); return i < 0 ? proj(lat, lng) : CENTER[i]; }
+// distance since the start/finish line (metres), via the self-calibrated sSF, so progress
+// resets where the data's lap counter ticks (kills the start/finish seam glitch)
+function sinceSF(s) {
+  if (sSF == null) return s;
+  return (((s - sSF) % TRACK_LEN) + TRACK_LEN) % TRACK_LEN;
 }
 
 // horse-race gap strip: order by official position, space by real along-track gap.
@@ -311,10 +322,18 @@ function renderGapStrip(cars) {
     .filter(o => o.s != null)
     .sort((a, b) => a.c.position - b.c.position);
 
-  // gap-to-leader (metres), accumulated from adjacent gaps (robust at the line)
+  // calibrate sSF from any car whose lap counter just ticked (it's at the line now)
+  for (const o of items) {
+    const prev = lastLap[o.c.car];
+    if (prev != null && o.c.lap > prev) sSF = (sSF == null) ? o.s : sSF * 0.8 + o.s * 0.2;
+    lastLap[o.c.car] = o.c.lap;
+  }
+  // absolute progress: lap (from data, so lapped cars stay lapped) + distance since S/F,
+  // then gap-to-leader as the cumulative sum of adjacent gaps — monotonic, seam-free
+  for (const o of items) o.total = o.c.lap * TRACK_LEN + sinceSF(o.s);
   for (let i = 0; i < items.length; i++) {
     if (i === 0) { items[0].gap = 0; continue; }
-    let g = (items[i-1].c.lap - items[i].c.lap) * TRACK_LEN + (items[i-1].s - items[i].s);
+    let g = items[i-1].total - items[i].total;
     if (g < 0) g = 0;
     items[i].gap = items[i-1].gap + g;
   }
@@ -381,7 +400,7 @@ function renderMap(cars) {
   const present = new Set();
   for (const c of cars) {
     if (c.retired || c.lat == null || c.lng == null) continue;
-    const p = proj(c.lat, c.lng);
+    const p = snapToTrack(c.lat, c.lng);   // ride the centerline, not the raw GPS line
     if (!p) continue;
     present.add(c.car);
     const sel = c.car === selectedCar;
@@ -449,6 +468,8 @@ function renderOrderAndStats(cars) {
 
 function renderState(msg) {
   lastState = msg;
+  if (msg.race_time_s < lastRaceTime - 5) { sSF = null; lastLap = {}; }   // replay restarted — recalibrate
+  lastRaceTime = msg.race_time_s;
   $("phase").textContent = msg.race_phase.replace(/_/g, " ");
   $("clock").textContent = fmtClock(msg.race_time_s);
   renderMap(msg.cars);
