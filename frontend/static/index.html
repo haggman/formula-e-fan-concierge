@@ -62,7 +62,7 @@
   #track-edge { fill: none; stroke: #6e7681; stroke-width: 16; stroke-linejoin: round; stroke-linecap: round; }
   #track { fill: none; stroke: #21262d; stroke-width: 12; stroke-linejoin: round; stroke-linecap: round; }
   .cardot { fill: var(--dim); stroke: var(--bg); stroke-width: 1.5; cursor: pointer;
-            transition: cx 1s linear, cy 1s linear, r .25s, fill .25s; }
+            transition: r .25s, fill .25s; }   /* cx/cy driven by the rAF along-track animation */
   .cardot:hover { fill: var(--text); }
   .cardot.sel { fill: var(--accent); }
   .cardot.am { fill: var(--am); }
@@ -162,7 +162,7 @@
 <body>
 <header>
   <h1>RACE-DAY COMPANION · BERLIN 2024</h1>
-  <span style="font-size:10px;color:var(--dim);border:1px solid var(--line);padding:1px 6px;border-radius:4px">build 7 · rails</span>
+  <span style="font-size:10px;color:var(--dim);border:1px solid var(--line);padding:1px 6px;border-radius:4px">build 8 · glide</span>
   <span class="phase" id="phase">—</span>
   <span class="clock" id="clock">t=—</span>
   <button id="audio-toggle" class="muted">🔇 MUTED</button>
@@ -239,8 +239,8 @@ let selectedCar = null;   // int | null
 let lastState = null;     // most recent state message
 let T = null;             // projection transform from track_outline.json
 let CENTER = [], CUMLEN = [], TRACK_LEN = 0;  // centerline points + arc-length (metres)
-let carDots = {}, gapBoxes = {};              // reused DOM elements, so CSS transitions can animate motion
-let lastLap = {}, sSF = null, lastRaceTime = -1;  // lap tracking + calibrated start/finish arc-length
+let carDots = {}, gapBoxes = {}, carAnim = {}; // reused DOM elements + per-car along-track animation state
+let carState = {}, lastRaceTime = -1;  // per-car continuous progress (seam-free), seeded from data lap
 
 // ---- selection ----
 function sendSelection() {
@@ -302,13 +302,32 @@ function nearestIdx(lat, lng) {
 }
 // distance (metres) around the lap — arc-length of the nearest centerline point
 function progress(lat, lng) { const i = nearestIdx(lat, lng); return i < 0 ? null : CUMLEN[i]; }
-// snap a car ONTO the centerline ("on the rails") so its dot never drifts off the ribbon
-function snapToTrack(lat, lng) { const i = nearestIdx(lat, lng); return i < 0 ? proj(lat, lng) : CENTER[i]; }
-// distance since the start/finish line (metres), via the self-calibrated sSF, so progress
-// resets where the data's lap counter ticks (kills the start/finish seam glitch)
-function sinceSF(s) {
-  if (sSF == null) return s;
-  return (((s - sSF) % TRACK_LEN) + TRACK_LEN) % TRACK_LEN;
+// the point ON the centerline at a given arc-length (interpolated between vertices) — used
+// to slide dots smoothly ALONG the track instead of cutting straight chords across curves
+function pointAtArc(a) {
+  if (!CENTER.length) return [0, 0];
+  a = ((a % TRACK_LEN) + TRACK_LEN) % TRACK_LEN;
+  let lo = 0, hi = CUMLEN.length - 1;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (CUMLEN[mid] < a) lo = mid + 1; else hi = mid; }
+  const i = Math.max(1, lo);
+  const seg = (CUMLEN[i] - CUMLEN[i - 1]) || 1;
+  const f = (a - CUMLEN[i - 1]) / seg;
+  return [CENTER[i-1][0] + (CENTER[i][0] - CENTER[i-1][0]) * f,
+          CENTER[i-1][1] + (CENTER[i][1] - CENTER[i-1][1]) * f];
+}
+// continuous per-car progress (metres), seam-free: seed absolute distance from the data's
+// lap ONCE (so a lapped car stays lapped), then accumulate UNWRAPPED s deltas. The
+// path-start wrap is corrected, so progress never jumps a lap near the line. (Mixing the
+// data's line-referenced lap with our path-start-referenced s every frame was the lurch.)
+function carTotal(c, s) {
+  let st = carState[c.car];
+  if (!st) { st = { prog: c.lap * TRACK_LEN + s, lastS: s }; carState[c.car] = st; return st.prog; }
+  let d = s - st.lastS;
+  if (d < -TRACK_LEN / 2) d += TRACK_LEN;        // crossed the centerline start (forward)
+  else if (d > TRACK_LEN / 2) d -= TRACK_LEN;    // backward jitter
+  st.prog += d;
+  st.lastS = s;
+  return st.prog;
 }
 
 // horse-race gap strip: order by official position, space by real along-track gap.
@@ -323,15 +342,8 @@ function renderGapStrip(cars) {
     .filter(o => o.s != null)
     .sort((a, b) => a.c.position - b.c.position);
 
-  // calibrate sSF from any car whose lap counter just ticked (it's at the line now)
-  for (const o of items) {
-    const prev = lastLap[o.c.car];
-    if (prev != null && o.c.lap > prev) sSF = (sSF == null) ? o.s : sSF * 0.8 + o.s * 0.2;
-    lastLap[o.c.car] = o.c.lap;
-  }
-  // absolute progress: lap (from data, so lapped cars stay lapped) + distance since S/F,
-  // then gap-to-leader as the cumulative sum of adjacent gaps — monotonic, seam-free
-  for (const o of items) o.total = o.c.lap * TRACK_LEN + sinceSF(o.s);
+  // continuous, seam-free progress per car; gap-to-leader = cumulative adjacent gaps
+  for (const o of items) o.total = carTotal(o.c, o.s);
   for (let i = 0; i < items.length; i++) {
     if (i === 0) { items[0].gap = 0; continue; }
     let g = items[i-1].total - items[i].total;
@@ -401,28 +413,47 @@ function renderMap(cars) {
   const present = new Set();
   for (const c of cars) {
     if (c.retired || c.lat == null || c.lng == null) continue;
-    const p = snapToTrack(c.lat, c.lng);   // ride the centerline, not the raw GPS line
-    if (!p) continue;
+    const aT = progress(c.lat, c.lng);   // target arc-length on the centerline (0..L)
+    if (aT == null) continue;
     present.add(c.car);
     const sel = c.car === selectedCar;
     let dot = carDots[c.car];
-    if (!dot) {  // create once, then reuse so the CSS transition animates movement
+    if (!dot) {  // create once; the rAF loop slides it ALONG the track (on the rails, smooth)
       dot = document.createElementNS(SVGNS, "circle");
       dot.addEventListener("click", () => selectCar(c.car));
       dot.appendChild(document.createElementNS(SVGNS, "title"));
       g.appendChild(dot);
       carDots[c.car] = dot;
+      carAnim[c.car] = { aT, aS: aT };                 // appear in place
+      const p0 = pointAtArc(aT);
+      dot.setAttribute("cx", p0[0].toFixed(1)); dot.setAttribute("cy", p0[1].toFixed(1));
     }
-    dot.setAttribute("cx", p[0].toFixed(1));
-    dot.setAttribute("cy", p[1].toFixed(1));
+    carAnim[c.car].aT = aT;                             // rAF eases aS toward this
     dot.setAttribute("r", sel ? 9 : 6);
     dot.setAttribute("class", "cardot" + (sel ? " sel" : c.am_active ? " am" : ""));
     dot.firstChild.textContent = `#${c.car} ${lastName(c.driver)} · P${c.position}`;
   }
   for (const car in carDots) {  // drop cars no longer running
-    if (!present.has(Number(car))) { carDots[car].remove(); delete carDots[car]; }
+    if (!present.has(Number(car))) { carDots[car].remove(); delete carDots[car]; delete carAnim[car]; }
   }
 }
+
+// animation loop: each frame, ease every dot's position ALONG the centerline toward its
+// target arc-length, so cars follow the curves smoothly (no chord-cutting, no jerk)
+function animateDots() {
+  for (const car in carAnim) {
+    const a = carAnim[car], dot = carDots[car];
+    if (!dot) continue;
+    let fwd = (((a.aT - a.aS) % TRACK_LEN) + TRACK_LEN) % TRACK_LEN;   // forward distance to target
+    if (fwd > TRACK_LEN * 0.5) fwd -= TRACK_LEN;                       // tiny backward jitter: short way
+    a.aS = (((a.aS + fwd * 0.18) % TRACK_LEN) + TRACK_LEN) % TRACK_LEN;
+    const p = pointAtArc(a.aS);
+    dot.setAttribute("cx", p[0].toFixed(1));
+    dot.setAttribute("cy", p[1].toFixed(1));
+  }
+  requestAnimationFrame(animateDots);
+}
+requestAnimationFrame(animateDots);
 
 function renderOrderAndStats(cars) {
   // header + (selected) stat strip
@@ -469,7 +500,7 @@ function renderOrderAndStats(cars) {
 
 function renderState(msg) {
   lastState = msg;
-  if (msg.race_time_s < lastRaceTime - 5) { sSF = null; lastLap = {}; }   // replay restarted — recalibrate
+  if (msg.race_time_s < lastRaceTime - 5) carState = {};   // replay restarted — reset progress tracking
   lastRaceTime = msg.race_time_s;
   $("phase").textContent = msg.race_phase.replace(/_/g, " ");
   $("clock").textContent = fmtClock(msg.race_time_s);
