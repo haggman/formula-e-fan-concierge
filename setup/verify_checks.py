@@ -104,7 +104,8 @@ def main() -> int:
                     "Tip: LOOP on keeps a long-lived stack always verifiable.")
             else:
                 bad(f"RaceState stale ({age}s old) with the sim mid-race — "
-                    "check fe-state-writer logs and the Pub/Sub push subscription")
+                    "check the fe-state-writer worker-pool logs and the "
+                    "fe-state-writer-sub pull subscription")
     except Exception as e:
         bad(f"Firestore check failed: {e}")
 

@@ -1,5 +1,18 @@
 # State Writer → Cloud Run Worker Pool (Pub/Sub pull)
 
+> **BUILT (2026-06-30).** Implemented per this spec: `state_writer/writer_core.py` (idempotent
+> `write_frame`/`build_event`/`event_doc_id`, lifted verbatim), `state_writer/worker.py` (StreamingPull
+> → decode → `write_frame` → ack; nack on transient, ack-drop on malformed; graceful SIGTERM),
+> `Dockerfile` runs `python -m state_writer.worker` (no web server), `requirements.txt` drops
+> fastapi/uvicorn + adds google-cloud-pubsub. `deploy/deploy_state_writer.sh` rewritten: worker-pool
+> deploy (size 1) + a **pull** subscription (`--clear-push-config` converts an existing push sub) +
+> `roles/pubsub.subscriber`, with the push-auth IAM (run.invoker, tokenCreator, service-agent) removed.
+> `state_writer/main.py` tombstoned; `scripts/seed_test_state.py` is now Firestore-direct only (the
+> `/ingest` path is gone). **Confirm at deploy time:** the exact `gcloud run worker-pools deploy`
+> verb/flags (esp. `--min-instances`/`--max-instances`) against current gcloud — worker pools were
+> GA-ing around this build. Note learned in build: the Pub/Sub *pull* client hands `message.data` as
+> the raw published bytes (no base64) — the base64 in the spec sketch is push-envelope only.
+
 Resolves open question **#5**. Converts the state writer from a FastAPI **push**-subscription
 Cloud Run *service* into a **Cloud Run Worker Pool** doing Pub/Sub **pull**. Safe because the
 writer is already idempotent (deterministic event doc IDs); redelivery converges.

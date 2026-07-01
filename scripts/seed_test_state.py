@@ -11,28 +11,24 @@ The sample includes:
   - Mixed scenarios across the field
   - Safety car phase
 
-Two ways to seed:
-  1. Direct Firestore write (default — just hit Firestore yourself)
-  2. HTTP POST to deployed State Writer's /ingest endpoint (validates the
-     end-to-end Pub/Sub-skipped path)
+Writes the frame DIRECTLY to Firestore — no Pub/Sub, no State Writer. (The State
+Writer is now a pull worker with no HTTP endpoint; for a full Pub/Sub path use the
+simulator, or the Pub/Sub emulator per spec/state_writer_worker_pool.md. This
+stays the fastest inner loop for frame-tools work.)
 
 Usage:
     python scripts/seed_test_state.py            # direct Firestore
-    python scripts/seed_test_state.py --via-writer http://localhost:8080
 """
 from __future__ import annotations
 
 from shared.script_env import require_venv
 require_venv()
 
-import argparse
-import json
 import os
 import sys
 import time
 from typing import Any
 
-import requests
 from google.cloud import firestore
 
 
@@ -113,36 +109,13 @@ def seed_via_firestore(project_id: str) -> None:
     print(f"  ✓ Wrote {len(SAMPLE_FRAME['events'])} events to race_events/")
 
 
-def seed_via_writer(writer_url: str) -> None:
-    """POST the sample frame to State Writer's /ingest endpoint."""
-    url = writer_url.rstrip("/") + "/ingest"
-    print(f"POSTing sample frame to {url}...")
-    r = requests.post(url, json=SAMPLE_FRAME, timeout=30)
-    r.raise_for_status()
-    print(f"  ✓ {r.status_code} {r.json()}")
-
-
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--via-writer",
-        help="State Writer base URL (e.g. http://localhost:8080). "
-             "If omitted, writes directly to Firestore.",
-    )
-    args = parser.parse_args()
-
-    if args.via_writer:
-        seed_via_writer(args.via_writer)
-    else:
-        project_id = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get(
-            "PROJECT_ID"
-        )
-        if not project_id:
-            print("ERROR: PROJECT_ID env var required. Run: source activate.sh",
-                  file=sys.stderr)
-            sys.exit(1)
-        seed_via_firestore(project_id)
-
+    project_id = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("PROJECT_ID")
+    if not project_id:
+        print("ERROR: PROJECT_ID env var required. Run: source activate.sh",
+              file=sys.stderr)
+        sys.exit(1)
+    seed_via_firestore(project_id)
     print("Done.")
 
 

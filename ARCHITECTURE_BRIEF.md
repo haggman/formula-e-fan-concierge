@@ -69,10 +69,11 @@ and a live path into Firestore "now." Students build the **backend agents**; the
 - `frontend/tts.py` (and `stt.py` if we keep voice input); the websocket `radio`-message pattern.
 
 **Change:**
-- **State writer** (`state_writer/main.py`, setup step 5) — today a **FastAPI push-subscription**
-  Cloud Run service (decodes Pub/Sub push → writes `RaceState` + events to Firestore, idempotent
-  via deterministic IDs). **Convert to a Cloud Run Worker Pool** doing Pub/Sub **pull**. Safe
-  because writes are idempotent. → revise setup step 5 + its deploy script.
+- **State writer** (setup step 5) — **DONE**: converted from the FastAPI push-subscription
+  service to a **Cloud Run Worker Pool** doing Pub/Sub **pull**. Domain logic (idempotent
+  `write_frame` + deterministic event IDs) lifted unchanged to `state_writer/writer_core.py`;
+  the pull loop is `state_writer/worker.py`; `deploy/deploy_state_writer.sh` deploys the pool +
+  a pull subscription and drops the push-auth IAM. See `spec/state_writer_worker_pool.md`.
 - **`frame_tools.py`** (`get_current_state, get_recent_events, get_events_in_range,
   get_field_am_status`) — currently car-#13 "our car" POV. Re-aim to **field-wide** + a
   selected-car parameter.

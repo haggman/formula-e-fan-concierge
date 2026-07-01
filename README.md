@@ -23,7 +23,7 @@ locked target architecture and `spec/` for every conversion spec.
 
 ```
 simulator/        Race replayer (Cloud Run) → Pub/Sub.            [KEPT from Ch2]
-state_writer/     Pub/Sub → Firestore "now".                      [CONVERT → Worker Pool, spec]
+state_writer/     Pub/Sub PULL → Firestore "now".                  [Cloud Run Worker Pool ✓]
 toolbox/          MCP Toolbox — 14 curated BigQuery tools.         [KEPT from Ch2]
 shared/           Pydantic models, scorer, Firestore reader.       [KEPT; scorer RE-AIMED, spec]
 setup/            Numbered setup scripts 1–6 + helpers.            [KEPT; step 5 rewritten, spec]

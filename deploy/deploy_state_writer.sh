@@ -1,14 +1,23 @@
 #!/usr/bin/env bash
-# Deploy the State Writer service to Cloud Run + wire Pub/Sub push subscription.
+# Deploy the State Writer as a Cloud Run WORKER POOL that PULLs from Pub/Sub and
+# writes RaceState + Events to Firestore. (Converted from the old FastAPI push
+# service — see spec/state_writer_worker_pool.md.)
 #
-# Idempotent: re-running updates the service and re-binds the subscription.
+# Why a worker pool: a Pub/Sub-pull consumer has no request surface, so it wants
+# a long-running worker, not an HTTP service. Pull also drops all the push-auth
+# plumbing (OIDC SA + run.invoker + tokenCreator on the Pub/Sub service agent).
 #
-# Required env vars (set by sourcing activate.sh):
-#   PROJECT_ID, REGION
+# Idempotent: re-running updates the pool and re-configures the subscription.
+#
+# NOTE: Cloud Run worker pools were GA-ing around this build. If `gcloud run
+# worker-pools deploy` or its flags differ in your gcloud, adjust the DEPLOY
+# block below — the rest (image build, pull subscription, IAM) is standard.
+#
+# Required env vars (set by sourcing activate.sh): PROJECT_ID, REGION
 
 set -euo pipefail
 
-SERVICE_NAME="${SERVICE_NAME:-fe-state-writer}"
+POOL_NAME="${SERVICE_NAME:-fe-state-writer}"          # worker pool name (kept the old name)
 TOPIC_NAME="${TOPIC_NAME:-fe-telemetry}"
 SUBSCRIPTION_NAME="${SUBSCRIPTION_NAME:-fe-state-writer-sub}"
 SA_NAME="${SA_NAME:-fe-state-writer-sa}"
@@ -26,12 +35,12 @@ SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo "=================================================================="
-echo "Project: $PROJECT_ID"
-echo "Region:  $REGION"
-echo "Service: $SERVICE_NAME"
-echo "Topic:   $TOPIC_NAME"
-echo "Sub:     $SUBSCRIPTION_NAME"
-echo "SA:      $SA_EMAIL"
+echo "Project:   $PROJECT_ID"
+echo "Region:    $REGION"
+echo "Pool:      $POOL_NAME   (Cloud Run worker pool, Pub/Sub pull)"
+echo "Topic:     $TOPIC_NAME"
+echo "Sub:       $SUBSCRIPTION_NAME   (pull)"
+echo "SA:        $SA_EMAIL"
 echo "=================================================================="
 
 # --- Enable APIs ---
@@ -43,12 +52,7 @@ gcloud services enable \
     cloudbuild.googleapis.com \
     --project="$PROJECT_ID"
 
-# --- Wait for the Cloud Run admin API to actually serve ---
-# On a brand-new project, `services enable` returns BEFORE the Run admin
-# surface is queryable, so the first describe/deploy/IAM call can hit
-# SERVICE_DISABLED and drop an interactive "enable and retry? (y/N)" prompt.
-# Poll a cheap read until it stops failing (same propagation pattern as the
-# IAM grants below) so the rest of the script runs unattended.
+# --- Wait for the Cloud Run admin API to actually serve (fresh-project race) ---
 echo ">>> Waiting for Cloud Run API to settle..."
 for attempt in 1 2 3 4 5 6; do
     gcloud run services list --region="$REGION" --project="$PROJECT_ID" --quiet >/dev/null 2>&1 && break
@@ -67,12 +71,10 @@ else
     echo "    SA $SA_EMAIL exists"
 fi
 
-# --- IAM grants ---
-# Firestore writes
+# --- IAM grants: Firestore write + Pub/Sub pull ---
+# (No run.invoker / tokenCreator / service-agent — those were push-auth only.)
 echo ">>> Granting roles..."
-for role in roles/datastore.user; do
-    # New SAs can take tens of seconds to propagate into IAM on a fresh
-    # project — retry instead of dying on "Service account ... does not exist".
+for role in roles/datastore.user roles/pubsub.subscriber; do
     granted=0
     for attempt in 1 2 3 4 5 6; do
         if gcloud projects add-iam-policy-binding "$PROJECT_ID" \
@@ -93,7 +95,7 @@ for role in roles/datastore.user; do
     echo "    granted $role"
 done
 
-# --- Topic must exist (the simulator creates it; this is just a safety net) ---
+# --- Topic must exist (the simulator creates it; safety net) ---
 echo ">>> Ensuring Pub/Sub topic exists..."
 if ! gcloud pubsub topics describe "$TOPIC_NAME" --project="$PROJECT_ID" >/dev/null 2>&1; then
     gcloud pubsub topics create "$TOPIC_NAME" --project="$PROJECT_ID"
@@ -102,16 +104,30 @@ else
     echo "    topic $TOPIC_NAME exists"
 fi
 
-# --- Deploy Cloud Run service ---
+# --- Create/convert the PULL subscription ---
+# A pull subscription has no push endpoint. If a push subscription from the old
+# deploy exists, --clear-push-config converts it to pull in place.
+echo ">>> Configuring Pub/Sub PULL subscription..."
+if gcloud pubsub subscriptions describe "$SUBSCRIPTION_NAME" --project="$PROJECT_ID" >/dev/null 2>&1; then
+    gcloud pubsub subscriptions update "$SUBSCRIPTION_NAME" \
+        --clear-push-config \
+        --ack-deadline=60 \
+        --project="$PROJECT_ID"
+    echo "    updated subscription $SUBSCRIPTION_NAME to pull"
+else
+    gcloud pubsub subscriptions create "$SUBSCRIPTION_NAME" \
+        --topic="$TOPIC_NAME" \
+        --ack-deadline=60 \
+        --message-retention-duration=10m \
+        --project="$PROJECT_ID"
+    echo "    created pull subscription $SUBSCRIPTION_NAME"
+fi
+
 # --- Build the container image with Cloud Build ---
 echo ">>> Building container image..."
-
-# Use Artifact Registry repo named "fe-services" in our region.
-# Idempotent: create if missing.
 REPO_NAME="${REPO_NAME:-fe-services}"
 if ! gcloud artifacts repositories describe "$REPO_NAME" \
-        --location="$REGION" \
-        --project="$PROJECT_ID" >/dev/null 2>&1; then
+        --location="$REGION" --project="$PROJECT_ID" >/dev/null 2>&1; then
     gcloud artifacts repositories create "$REPO_NAME" \
         --location="$REGION" \
         --repository-format=docker \
@@ -132,123 +148,35 @@ steps:
     args: ['build', '-t', '${IMAGE}', '-f', 'state_writer/Dockerfile', '.']
 images: ['${IMAGE}']
 EOF
-
-gcloud builds submit "$REPO_ROOT" \
-    --config="$CB_CONFIG" \
-    --project="$PROJECT_ID"
-
+gcloud builds submit "$REPO_ROOT" --config="$CB_CONFIG" --project="$PROJECT_ID"
 rm -f "$CB_CONFIG"
-
 echo "    built and pushed: $IMAGE"
 
-# --- Deploy Cloud Run service ---
-echo ">>> Deploying Cloud Run service..."
-gcloud run deploy "$SERVICE_NAME" \
+# --- Deploy the worker pool ---
+# 1 Hz frames, single race → size 1 is plenty (idempotency makes scaling safe
+# but unnecessary). No URL, no port, no concurrency/timeout — it's not a service.
+echo ">>> Deploying Cloud Run worker pool..."
+gcloud run worker-pools deploy "$POOL_NAME" \
     --image="$IMAGE" \
     --region="$REGION" \
     --project="$PROJECT_ID" \
     --service-account="$SA_EMAIL" \
-    --no-allow-unauthenticated \
     --cpu=1 \
     --memory=512Mi \
-    --cpu-boost \
-    --min-instances=0 \
-    --max-instances=3 \
-    --concurrency=10 \
-    --timeout=60 \
-    --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},RACE_ID=berlin_2024_r10" \
+    --min-instances=1 \
+    --max-instances=1 \
+    --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},SUBSCRIPTION_NAME=${SUBSCRIPTION_NAME}" \
     --quiet
 
-# Post-deploy describe can hit a stale API frontend (SERVICE_DISABLED
-# seconds after a successful deploy — enablement propagates per replica).
-# The deploy already succeeded; never let the readback kill the script.
-URL=""
-for attempt in 1 2 3 4 5 6; do
-    URL="$(gcloud run services describe "$SERVICE_NAME" --region="$REGION" --project="$PROJECT_ID" --format='value(status.url)' --quiet 2>/dev/null || true)"
-    [[ -n "$URL" ]] && break
-    echo "    ...deployed, but describe isn't serving yet (API propagation) — retry ${attempt}/6 in 10s"
-    sleep 10
-done
-if [[ -z "$URL" ]]; then
-    echo "ERROR: ${SERVICE_NAME} deployed but its URL is unreadable after 6 tries — rerun this script (idempotent)." >&2
-    exit 1
-fi
-
-# --- Trigger Pub/Sub service agent provisioning ---
-# The service agent (service-PROJECT_NUMBER@gcp-sa-pubsub.iam.gserviceaccount.com)
-# is created on first Pub/Sub use in a project. Enabling the API alone doesn't
-# materialize it. Force-create here so IAM bindings below can target it.
-PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
-PUBSUB_SA="service-${PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com"
-
-echo ">>> Provisioning Pub/Sub service agent..."
-gcloud beta services identity create \
-    --service=pubsub.googleapis.com \
-    --project="$PROJECT_ID" >/dev/null
-echo "    service agent: $PUBSUB_SA"
-
-# --- Grant Pub/Sub SA permissions to invoke Cloud Run + use the SA token ---
-# OIDC push auth: Pub/Sub mints a token AS the push-auth SA (fe-state-writer-sa),
-# so THAT identity is what Cloud Run sees — it needs run.invoker. The Pub/Sub
-# service agent only mints the token (tokenCreator below); it never invokes.
-echo ">>> Granting push-auth SA invoker on Cloud Run service..."
-gcloud run services add-iam-policy-binding "$SERVICE_NAME" \
-    --member="serviceAccount:${SA_EMAIL}" \
-    --role="roles/run.invoker" \
-    --region="$REGION" \
-    --project="$PROJECT_ID" \
-    --quiet --verbosity=error
-
-# Service agents materialize in IAM seconds-to-tens-of-seconds AFTER
-# `services identity create` returns — and there's no existence probe for
-# them (they live in a Google-owned tenant project), so the grant itself
-# is the probe. Same 6x10s pattern as the project-level grants above.
-granted=0
-for attempt in 1 2 3 4 5 6; do
-    if gcloud iam service-accounts add-iam-policy-binding "$SA_EMAIL" \
-        --member="serviceAccount:${PUBSUB_SA}" \
-        --role="roles/iam.serviceAccountTokenCreator" \
-        --project="$PROJECT_ID" \
-        --quiet >/dev/null 2>&1; then
-        granted=1
-        break
-    fi
-    echo "    ...IAM can't see ${PUBSUB_SA} yet (service agent propagating) — retry ${attempt}/6 in 10s"
-    sleep 10
-done
-if [[ "$granted" != "1" ]]; then
-    echo "ERROR: failed to grant tokenCreator to ${PUBSUB_SA} after 6 attempts" >&2
-    exit 1
-fi
-echo "    granted roles/iam.serviceAccountTokenCreator to ${PUBSUB_SA}"
-
-# --- Create or update the push subscription ---
-echo ">>> Configuring Pub/Sub push subscription..."
-if gcloud pubsub subscriptions describe "$SUBSCRIPTION_NAME" --project="$PROJECT_ID" >/dev/null 2>&1; then
-    gcloud pubsub subscriptions update "$SUBSCRIPTION_NAME" \
-        --push-endpoint="$URL/" \
-        --push-auth-service-account="$SA_EMAIL" \
-        --project="$PROJECT_ID"
-    echo "    updated subscription $SUBSCRIPTION_NAME"
-else
-    gcloud pubsub subscriptions create "$SUBSCRIPTION_NAME" \
-        --topic="$TOPIC_NAME" \
-        --push-endpoint="$URL/" \
-        --push-auth-service-account="$SA_EMAIL" \
-        --ack-deadline=60 \
-        --message-retention-duration=10m \
-        --project="$PROJECT_ID"
-    echo "    created subscription $SUBSCRIPTION_NAME"
-fi
-
 echo ""
 echo "=================================================================="
-echo "Deployed!"
-echo "URL: $URL"
+echo "Deployed worker pool: $POOL_NAME"
 echo ""
-echo "Health check:  curl -H \"Authorization: Bearer \$(gcloud auth print-identity-token)\" $URL/health"
-echo "Status:        curl -H \"Authorization: Bearer \$(gcloud auth print-identity-token)\" $URL/status"
+echo "It pulls $SUBSCRIPTION_NAME and writes race_states/ + race_events/ in Firestore."
+echo "Logs:    gcloud run worker-pools logs read $POOL_NAME --region $REGION"
+echo "Status:  gcloud run worker-pools describe $POOL_NAME --region $REGION"
 echo "=================================================================="
 echo ""
-echo "Next step: deploy the simulator (companion repo) so it publishes to $TOPIC_NAME."
-echo "Once the simulator is running, RaceState in Firestore will update at 1 Hz."
+echo "Next: run the simulator so it publishes to $TOPIC_NAME. RaceState in"
+echo "Firestore then updates at 1 Hz (verify with: python setup/verify_checks.py"
+echo "or the SIM bar in the frontend)."
