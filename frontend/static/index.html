@@ -162,7 +162,7 @@
 <body>
 <header>
   <h1>RACE-DAY COMPANION · BERLIN 2024</h1>
-  <span style="font-size:10px;color:var(--dim);border:1px solid var(--line);padding:1px 6px;border-radius:4px">build 8 · glide</span>
+  <span style="font-size:10px;color:var(--dim);border:1px solid var(--line);padding:1px 6px;border-radius:4px">build 9 · glide</span>
   <span class="phase" id="phase">—</span>
   <span class="clock" id="clock">t=—</span>
   <button id="audio-toggle" class="muted">🔇 MUTED</button>
@@ -240,6 +240,7 @@ let lastState = null;     // most recent state message
 let T = null;             // projection transform from track_outline.json
 let CENTER = [], CUMLEN = [], TRACK_LEN = 0;  // centerline points + arc-length (metres)
 let carDots = {}, gapBoxes = {}, carAnim = {}; // reused DOM elements + per-car along-track animation state
+let animStart = 0, animDur = 1000, lastUpdateT = 0;  // linear tween window (matched to the update interval)
 let carState = {}, lastRaceTime = -1;  // per-car continuous progress (seam-free), seeded from data lap
 
 // ---- selection ----
@@ -410,6 +411,11 @@ function renderGapStrip(cars) {
 function renderMap(cars) {
   if (!T) return;
   const g = $("cars");
+  // open a new linear tween window sized to the actual gap between updates (~1s), so the
+  // dots move at constant speed and arrive just as the next update lands — like the strip
+  const now = performance.now();
+  animDur = lastUpdateT ? Math.min(2000, Math.max(400, now - lastUpdateT)) : 1000;
+  animStart = now; lastUpdateT = now;
   const present = new Set();
   for (const c of cars) {
     if (c.retired || c.lat == null || c.lng == null) continue;
@@ -418,17 +424,19 @@ function renderMap(cars) {
     present.add(c.car);
     const sel = c.car === selectedCar;
     let dot = carDots[c.car];
-    if (!dot) {  // create once; the rAF loop slides it ALONG the track (on the rails, smooth)
+    if (!dot) {  // create once; the rAF loop slides it ALONG the track (on the rails)
       dot = document.createElementNS(SVGNS, "circle");
       dot.addEventListener("click", () => selectCar(c.car));
       dot.appendChild(document.createElementNS(SVGNS, "title"));
       g.appendChild(dot);
       carDots[c.car] = dot;
-      carAnim[c.car] = { aT, aS: aT };                 // appear in place
+      carAnim[c.car] = { aS: aT, aFrom: aT, aTo: aT };  // appear in place
       const p0 = pointAtArc(aT);
       dot.setAttribute("cx", p0[0].toFixed(1)); dot.setAttribute("cy", p0[1].toFixed(1));
+    } else {
+      carAnim[c.car].aFrom = carAnim[c.car].aS;         // new tween starts from where it is now
+      carAnim[c.car].aTo = aT;
     }
-    carAnim[c.car].aT = aT;                             // rAF eases aS toward this
     dot.setAttribute("r", sel ? 9 : 6);
     dot.setAttribute("class", "cardot" + (sel ? " sel" : c.am_active ? " am" : ""));
     dot.firstChild.textContent = `#${c.car} ${lastName(c.driver)} · P${c.position}`;
@@ -438,15 +446,17 @@ function renderMap(cars) {
   }
 }
 
-// animation loop: each frame, ease every dot's position ALONG the centerline toward its
-// target arc-length, so cars follow the curves smoothly (no chord-cutting, no jerk)
+// animation loop: LINEAR tween of each dot ALONG the centerline over the update interval —
+// constant speed that lands as the next update arrives, so motion is continuous (matches the
+// strip; the old exponential easing zoomed then paused every second)
 function animateDots() {
+  const t = animDur ? Math.min(1, (performance.now() - animStart) / animDur) : 1;
   for (const car in carAnim) {
     const a = carAnim[car], dot = carDots[car];
-    if (!dot) continue;
-    let fwd = (((a.aT - a.aS) % TRACK_LEN) + TRACK_LEN) % TRACK_LEN;   // forward distance to target
-    if (fwd > TRACK_LEN * 0.5) fwd -= TRACK_LEN;                       // tiny backward jitter: short way
-    a.aS = (((a.aS + fwd * 0.18) % TRACK_LEN) + TRACK_LEN) % TRACK_LEN;
+    if (!dot || a.aFrom == null) continue;
+    let fwd = (((a.aTo - a.aFrom) % TRACK_LEN) + TRACK_LEN) % TRACK_LEN;  // forward to target
+    if (fwd > TRACK_LEN * 0.5) fwd -= TRACK_LEN;                          // backward jitter: short way
+    a.aS = (((a.aFrom + fwd * t) % TRACK_LEN) + TRACK_LEN) % TRACK_LEN;
     const p = pointAtArc(a.aS);
     dot.setAttribute("cx", p[0].toFixed(1));
     dot.setAttribute("cy", p[1].toFixed(1));
