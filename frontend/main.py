@@ -29,7 +29,6 @@ from fastapi import Body, FastAPI, HTTPException, Request, WebSocket, WebSocketD
 from fastapi.responses import FileResponse
 
 from frontend.commentator_loop import CommentatorLoop
-from frontend.stt import transcribe
 from frontend.tts import synthesize
 from shared.models import RaceState
 from shared.state_client import get_state_client
@@ -221,22 +220,6 @@ async def track_outline() -> FileResponse:
     return FileResponse(path, headers=_NO_CACHE)
 
 
-async def _handle_ask(question: str) -> None:
-    stamp = {"race_time_s": latest["race_time_s"], "lap": latest["lap"]}
-    t0 = time.monotonic()
-    try:
-        answer = await commentator.ask(question)
-        await radio_broadcast({"type": "radio", "kind": "qa",
-                               "text": answer,
-                               "secs": round(time.monotonic() - t0, 1),
-                               **stamp})
-    except Exception as e:
-        logger.warning("qa failed: %s", str(e).splitlines()[0][:160])
-        await radio_broadcast({"type": "radio", "kind": "qa",
-                               "text": "Radio failure on that one — ask again.",
-                               "error": True, **stamp})
-
-
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket) -> None:
     await manager.connect(ws)
@@ -247,23 +230,14 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 data = json.loads(raw)
             except json.JSONDecodeError:
                 continue
-            msg_type = data.get("type")
-
             # The fan clicked a car (or cleared the selection). Thread it into
             # the commentator loop so commentary narrows onto that car; null /
             # missing car_number = back to pure field-wide.
-            if msg_type == "select" and commentator:
+            # (Ask-anything Q&A now lives in the embedded CX concierge widget,
+            # not a websocket path — the commentator is the push voice only.)
+            if data.get("type") == "select" and commentator:
                 car = data.get("car_number")
                 commentator.set_selection(int(car) if car is not None else None)
-                continue
-
-            question = (data.get("question") or "").strip()
-            if msg_type == "ask" and question and commentator:
-                await manager.broadcast({
-                    "type": "radio", "kind": "question", "text": question,
-                    "race_time_s": latest["race_time_s"], "lap": latest["lap"],
-                })
-                asyncio.create_task(_handle_ask(question))
     except WebSocketDisconnect:
         manager.disconnect(ws)
 
@@ -327,21 +301,3 @@ async def sim_control(action: str, payload: dict | None = Body(default=None)) ->
         return r.json()
 
 
-# ============================================================================
-# Push-to-talk transcription
-# ============================================================================
-
-
-@app.post("/api/stt")
-async def stt(request: Request) -> dict:
-    """Body: raw audio bytes from MediaRecorder (webm/opus or whatever the
-    browser produced — Speech V2 auto-detects). Returns the transcript."""
-    audio = await request.body()
-    if not audio:
-        raise HTTPException(400, "empty audio")
-    try:
-        transcript = await transcribe(audio)
-    except Exception as e:
-        logger.warning("stt failed: %s", str(e).splitlines()[0][:160])
-        raise HTTPException(502, "transcription failed")
-    return {"transcript": transcript}

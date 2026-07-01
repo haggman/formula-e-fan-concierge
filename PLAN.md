@@ -215,7 +215,7 @@ Each is its own focused conversation; this doc + `spec/` are the shared referenc
 | 9 | **`frame_tools` + `scorer` re-aim** | ✅ done (verified offline) | field-wide + selected-car boost; `get_field_state(selected_car)` + focus block; `shared/scorer.py` re-aimed (event-significance constants + `SELECTED_CAR_BOOST`). Resolutions + learnings in `spec/frame_tools_scorer_reaim.md` §5. Fed #4 |
 | 10 | **Doc suite & run of show** | last | Student Guide / Run of Show / Demo / How It Works, mirroring Ch2 |
 | 11 | **BQML / data-science** | stretch | segmentation / recommender |
-| 12 | **`architecture.svg` rebuild** | anytime | `spec/architecture_svg_plan.md` |
+| 12 | **`architecture.svg` rebuild** | 🔖 backlog — do as a LAST step | Current `docs/architecture.svg` is the stale Ch2 diagram (single agent, push state writer, A–F ladder). Rebuild for the Race-Day Companion (3 agents, worker-pool pull, fan UI, CX). Build is settled + plan ready: `spec/architecture_svg_plan.md` |
 
 ---
 

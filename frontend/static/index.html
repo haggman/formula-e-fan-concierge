@@ -130,20 +130,7 @@
   #pending { color: var(--dim); font-style: italic; display: none; }
   #placeholder { color: var(--dim); font-style: italic; }
 
-  /* ---- bottom bars (full width) ---- */
-  #bottombar { display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); flex: 0 0 auto; }
-  #bottombar input {
-    flex: 1; background: var(--panel); border: 1px solid var(--line);
-    color: var(--text); padding: 8px 12px; border-radius: 6px; font: inherit;
-  }
-  #bottombar button {
-    background: var(--accent); border: 0; color: #000; font: inherit;
-    padding: 8px 18px; border-radius: 6px; cursor: pointer;
-  }
-  #mic { background: var(--panel); border: 1px solid var(--line); color: var(--text); user-select: none; }
-  #mic.rec { background: var(--bad); border-color: var(--bad); color: #fff; }
-  #mic.busy { opacity: 0.5; }
-
+  /* ---- bottom bar (sim controls) ---- */
   #simbar {
     display: flex; align-items: center; gap: 10px;
     padding: 6px 16px; border-top: 1px solid var(--line);
@@ -157,12 +144,26 @@
   #simbar button:hover { border-color: var(--dim); }
   #simbar label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
   #sim-msg { margin-left: auto; }
+
+  /* CX concierge chat widget — fixed help-bubble in the bottom-right corner */
+  chat-messenger { position: fixed; bottom: 16px; right: 16px; width: 64px; height: 64px; z-index: 999; }
 </style>
+<!-- ================================================================= -->
+<!-- CX CONCIERGE — PASTE THE AGENT STUDIO **HEAD** SNIPPET BELOW HERE  -->
+<!-- (the "Paste into head" block: the chat-messenger SDK loader script -->
+<!--  and its stylesheet link). The BODY snippet goes near the end of  -->
+<!--  the page (see the matching BODY slot before the closing script). -->
+<!-- ================================================================= -->
+<script defer
+  src="https://www.gstatic.com/chat-messenger/sdk/prod/v1.16/chat-messenger.js">
+</script>
+<link rel="stylesheet" href="https://www.gstatic.com/chat-messenger/sdk/prod/v1.16/themes/chat-messenger-default.css">
+<link rel="stylesheet" href="https://www.gstatic.com/chat-messenger/sdk/prod/v1.16/themes/chat-messenger-layout.css">
 </head>
 <body>
 <header>
   <h1>RACE-DAY COMPANION · BERLIN 2024</h1>
-  <span style="font-size:10px;color:var(--dim);border:1px solid var(--line);padding:1px 6px;border-radius:4px">build 9 · glide</span>
+  <span style="font-size:10px;color:var(--dim);border:1px solid var(--line);padding:1px 6px;border-radius:4px">build 11 · concierge</span>
   <span class="phase" id="phase">—</span>
   <span class="clock" id="clock">t=—</span>
   <button id="audio-toggle" class="muted">🔇 MUTED</button>
@@ -199,11 +200,6 @@
     </div>
   </div>
 </main>
-<div id="bottombar">
-  <input id="question" placeholder="Ask the commentator about the race… (or hold SPACE to talk)">
-  <button id="mic" title="Hold to talk (or hold Space outside the text box)">🎤</button>
-  <button id="ask">ASK</button>
-</div>
 <div id="simbar">
   <span class="sim-label">SIM</span>
   <button id="sim-restart">RESTART</button>
@@ -214,10 +210,35 @@
   <span id="sim-msg"></span>
 </div>
 
-<!--
-  CX CONCIERGE CHAT WIDGET — follow-on / bonus (#5 + #7). The ask-anything concierge bot
-  embeds here (df-messenger custom element plus its loader). Left out of this pass on purpose.
--->
+<!-- ================================================================= -->
+<!-- CX CONCIERGE — PASTE THE AGENT STUDIO **BODY** SNIPPET BELOW HERE  -->
+<!-- (the "Paste before the closing body tag" block: the chat-messenger -->
+<!--  element that registers the deployment). For a corner bubble, swap -->
+<!--  its chat-messenger-container for chat-messenger-chat-bubble.       -->
+<!-- ================================================================= -->
+<script>
+    window.addEventListener("chat-messenger-loaded", () => {
+      chatSdk.registerContext(
+        chatSdk.prebuilts.ces.createContext({
+          deploymentName: "projects/100312147842/locations/us/apps/085c8e01-e9ff-409e-be4f-03b36163cc8d/deployments/f2b42b62-4252-42bc-bc1d-d242d7af3328",
+          tokenBroker: {
+            enableTokenBroker: true,
+            enableRecaptcha: false
+          }
+        }),
+      );
+    });
+</script>
+<chat-messenger
+  url-allowlist="*"
+  color-scheme="dark"
+>
+  <chat-messenger-chat-bubble
+    chat-title="Concierge Chat"
+    chat-title-icon="https://gstatic.com/dialogflow-console/common/assets/ccai-favicons/conversational_agents.png"
+    enable-file-upload
+  ></chat-messenger-chat-bubble>
+</chat-messenger>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -560,16 +581,6 @@ function addCommentary(msg) {
   log.scrollTop = log.scrollHeight;
 }
 
-function sendQuestion() {
-  const input = $("question");
-  const q = input.value.trim();
-  if (!q || !ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({ type: "ask", question: q }));
-  input.value = "";
-}
-$("ask").onclick = sendQuestion;
-$("question").addEventListener("keydown", e => { if (e.key === "Enter") sendQuestion(); });
-
 // ---- simulator controls ----
 async function simCall(action, payload) {
   const msg = $("sim-msg");
@@ -604,46 +615,6 @@ $("sim-speed").onchange = e => simCall("speed", { multiplier: Number(e.target.va
 $("sim-loop").onchange = e => simCall("auto-restart", { enabled: e.target.checked });
 $("sim-finish").onclick = async () => { await simCall("finish"); initSimBar(); };
 initSimBar();
-
-// ---- push-to-talk ----
-let micStream = null, recorder = null, recChunks = [], recording = false;
-async function pttStart() {
-  if (recording) return;
-  try { micStream = micStream || await navigator.mediaDevices.getUserMedia({ audio: true }); }
-  catch { $("mic").textContent = "🚫"; $("mic").title = "Microphone blocked by the browser"; return; }
-  recording = true; recChunks = [];
-  recorder = new MediaRecorder(micStream);
-  recorder.ondataavailable = e => { if (e.data.size) recChunks.push(e.data); };
-  recorder.onstop = sendRecording;
-  recorder.start();
-  $("mic").classList.add("rec"); $("mic").textContent = "● REC";
-}
-function pttStop() {
-  if (!recording) return;
-  recording = false; recorder.stop();
-  $("mic").classList.remove("rec"); $("mic").textContent = "🎤";
-}
-async function sendRecording() {
-  const blob = new Blob(recChunks, { type: recorder.mimeType });
-  if (blob.size < 1000) return;
-  const mic = $("mic"); mic.classList.add("busy"); mic.textContent = "…";
-  try {
-    const r = await fetch("/api/stt", { method: "POST", body: blob });
-    if (!r.ok) throw new Error();
-    const { transcript } = await r.json();
-    if (transcript) { $("question").value = transcript; setTimeout(sendQuestion, 600); }
-  } catch { $("question").placeholder = "Didn't catch that — try again or type"; }
-  finally { mic.classList.remove("busy"); mic.textContent = "🎤"; }
-}
-$("mic").addEventListener("mousedown", pttStart);
-$("mic").addEventListener("touchstart", e => { e.preventDefault(); pttStart(); });
-for (const ev of ["mouseup", "mouseleave", "touchend"]) $("mic").addEventListener(ev, pttStop);
-document.addEventListener("keydown", e => {
-  if (e.code === "Space" && !e.repeat && document.activeElement !== $("question")) { e.preventDefault(); pttStart(); }
-});
-document.addEventListener("keyup", e => {
-  if (e.code === "Space" && document.activeElement !== $("question")) { e.preventDefault(); pttStop(); }
-});
 
 // ---- websocket ----
 let ws, retry = 1000;
